@@ -1,3 +1,4 @@
+import {issueResetGrant,resetCookie} from './password-recovery.mjs';
 import {randomBytes,createHash} from 'node:crypto';
 import {nicknameError,nicknameKey,publicUser,ADMIN_EMAIL} from './community.mjs';
 import {verifyPassword} from './account.mjs';
@@ -79,6 +80,11 @@ export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
   if((identity&&identity.status!=='active')||(existing&&existing.status!=='active'))return answer(403,{error:'이용이 제한되었거나 탈퇴한 계정입니다.'});
   const linked=existing?await db.prepare('SELECT provider FROM social_identities WHERE user_id=?').all(existing.id):[];
   const verifyWith=linked.filter(row=>row.provider!==pending.provider&&providerStatus(env).some(p=>p.id===row.provider&&p.enabled)).map(row=>({id:row.provider,name:providers[row.provider].name}));
+  if(path==='/api/social/recover'){
+    if(!identity)return answer(403,{error:'기존 계정에 이미 연동된 SNS로 인증해야 비밀번호를 재설정할 수 있습니다. 이메일만 같다고 본인 확인이 되지는 않습니다.'});
+    const token=await issueResetGrant(db,identity);await db.prepare('DELETE FROM oauth_pending WHERE token_hash=?').run(pending.token_hash);
+    return answer(200,{ok:true,email:identity.email},{'Set-Cookie':resetCookie(request,token)});
+  }
   if(path==='/api/social/pending')return answer(200,{provider:pending.provider,name:providers[pending.provider].name,email:pending.email,kind:identity?'login':existing?'link':'signup',needsPassword:!!existing?.password_hash,canLink:!!user&&user.id===existing?.id,verifyWith});
   if(path==='/api/social/verify'){
     if(identity||!existing||!verifyWith.some(p=>p.id===input.provider))return answer(400,{error:'기존 계정에 연결된 SNS를 선택해 주세요.'});

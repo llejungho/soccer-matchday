@@ -1,6 +1,7 @@
+import {recoverySchema} from './password-recovery.mjs';
 import {accountSchema} from './account.mjs';
 import {socialSchema} from './social-auth.mjs';
-export const enhancementsSchema=`${accountSchema}${socialSchema}
+export const enhancementsSchema=`${accountSchema}${socialSchema}${recoverySchema}
 CREATE TABLE IF NOT EXISTS board_views(post_id INTEGER NOT NULL REFERENCES board_posts(id) ON DELETE CASCADE,viewer_key TEXT NOT NULL,viewed_at INTEGER NOT NULL,PRIMARY KEY(post_id,viewer_key));
 CREATE TABLE IF NOT EXISTS board_recommendations(post_id INTEGER NOT NULL REFERENCES board_posts(id) ON DELETE CASCADE,user_id INTEGER NOT NULL REFERENCES users(id),PRIMARY KEY(post_id,user_id));
 CREATE UNIQUE INDEX IF NOT EXISTS board_guide_key ON board_posts(guide_key);`;

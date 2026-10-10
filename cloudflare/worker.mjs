@@ -1,3 +1,4 @@
+import {handleRecovery} from '../password-recovery.mjs';
 import {handleAccount} from '../account.mjs';
 import {handleSocial} from '../social-auth.mjs';
 import { handleCommunity,nicknameError,nicknameKey,publicUser} from '../community.mjs';
@@ -91,7 +92,8 @@ export default {
           return json(200,{ok:true},{'Set-Cookie':cookie(request,'',0)});
         }
         let result;
-        if(path.startsWith('/api/account/'))result=await handleAccount(db,path,user,input);
+        if(path.startsWith('/api/recovery/'))result=await handleRecovery(db,request,env,input);
+        else if(path.startsWith('/api/account/'))result=await handleAccount(db,path,user,input);
         else if(path.startsWith('/api/social/'))result=await handleSocial(db,request,env,user,input);
         else if(path.startsWith('/api/community/'))result=await handleCommunity(db,path,user,input);
         else if(path.startsWith('/api/teams/'))result=await handleTeams(db,path,user,input);
@@ -102,6 +104,7 @@ export default {
       if(request.method==='GET'){
         const db=await new Database(env.DB).start();let result;
         if(path.startsWith('/api/social/'))result=await handleSocial(db,request,env,await userFor(db,request));
+        else if(path==='/api/recovery/status')result=await handleRecovery(db,request,env);
         else if(path==='/api/me')result={status:200,body:{user:publicUser(await userFor(db,request))}};
         else if(path==='/api/teams/state')result=await handleTeams(db,path,await userFor(db,request),{});
         else if(path.startsWith('/api/shared/'))result=await sharedSquad(db,path.slice('/api/shared/'.length));

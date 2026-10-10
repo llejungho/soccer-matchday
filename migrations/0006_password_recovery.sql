@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS password_resets(token_hash TEXT PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),expires_at INTEGER NOT NULL,credential_hash TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS recovery_attempts(key TEXT PRIMARY KEY,count INTEGER NOT NULL,until INTEGER NOT NULL);

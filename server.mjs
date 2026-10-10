@@ -1,3 +1,4 @@
+import {handleRecovery} from './password-recovery.mjs';
 import {seedGuide} from './guide.mjs';
 import {handleAccount} from './account.mjs';
 import {handleSocial} from './social-auth.mjs';
@@ -54,7 +55,7 @@ async function body(req) {
   }
   return JSON.parse(content);
 }
-async function socialOrAccount(req,res,url,input){const adapter=asyncDatabase(db),user=userFor(req),request=new Request('http://'+req.headers.host+req.url,{method:req.method,headers:req.headers});const result=url.pathname.startsWith('/api/account/')?await handleAccount(adapter,url.pathname,user,input):await handleSocial(adapter,request,process.env,user,input);const body={...result.body};if(body.signedOut)res.setHeader('Set-Cookie','session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');if(body.signInUser||body.renewSession){signIn(res,body.signInUser?db.prepare('SELECT * FROM users WHERE id=?').get(body.signInUser):body.user);delete body.signInUser;delete body.renewSession;}for(const [key,value] of Object.entries(result.headers||{})){if(key==='Set-Cookie'&&res.getHeader(key))res.setHeader(key,[res.getHeader(key),value]);else res.setHeader(key,value);}return json(res,result.status,result.body===null?null:body);}
+async function socialOrAccount(req,res,url,input){const adapter=asyncDatabase(db),user=userFor(req),request=new Request('http://'+req.headers.host+req.url,{method:req.method,headers:req.headers});const result=url.pathname.startsWith('/api/recovery/')?await handleRecovery(adapter,request,process.env,input):url.pathname.startsWith('/api/account/')?await handleAccount(adapter,url.pathname,user,input):await handleSocial(adapter,request,process.env,user,input);const body={...result.body};if(body.signedOut)res.setHeader('Set-Cookie','session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');if(body.signInUser||body.renewSession){signIn(res,body.signInUser?db.prepare('SELECT * FROM users WHERE id=?').get(body.signInUser):body.user);delete body.signInUser;delete body.renewSession;}for(const [key,value] of Object.entries(result.headers||{})){if(key==='Set-Cookie'&&res.getHeader(key))res.setHeader(key,[res.getHeader(key),value]);else res.setHeader(key,value);}return json(res,result.status,result.body===null?null:body);}
 const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
@@ -63,7 +64,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname.startsWith('/api/shared/')) {const result=sharedSquad(db,url.pathname.slice('/api/shared/'.length));return json(res,result.status,result.body);}
     if (req.method === 'GET' && url.pathname.startsWith('/share/')) {res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});return res.end(readFileSync(path.join(root,'public','shared.html')));}
-    if(req.method==='GET'&&url.pathname.startsWith('/api/social/'))return await socialOrAccount(req,res,url,{});
+    if(req.method==='GET'&&(url.pathname.startsWith('/api/social/')||url.pathname==='/api/recovery/status'))return await socialOrAccount(req,res,url,{});
     if (url.pathname === '/api/me' && req.method === 'GET') return json(res, 200, { user: publicUser(userFor(req)) });
     if (url.pathname === '/api/teams/state' && req.method === 'GET') {
       const result = handleTeams(db, url.pathname, userFor(req), {});
@@ -73,7 +74,7 @@ const server = http.createServer(async (req, res) => {
       const expected = process.env.PUBLIC_ORIGIN || `http://${req.headers.host}`;
       if (req.headers.origin !== expected) return json(res, 403, { error: '허용되지 않은 요청입니다.' });
       if (!req.headers['content-type']?.startsWith('application/json')) return json(res, 415, { error: 'JSON 형식이 필요합니다.' });
-      if(url.pathname.startsWith('/api/social/')||url.pathname.startsWith('/api/account/'))return await socialOrAccount(req,res,url,await body(req));
+      if(url.pathname.startsWith('/api/recovery/')||url.pathname.startsWith('/api/social/')||url.pathname.startsWith('/api/account/'))return await socialOrAccount(req,res,url,await body(req));
       if(url.pathname.startsWith('/api/community/')){const result=await handleCommunity(asyncDatabase(db),url.pathname,userFor(req),await body(req));return json(res,result.status,result.body);}
       if (url.pathname.startsWith('/api/squads/')) {const result=handleSquads(db,url.pathname,userFor(req),await body(req));return json(res,result.status,result.body);}
       if (url.pathname.startsWith('/api/teams/')) {

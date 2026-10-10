@@ -1,3 +1,4 @@
+import {initializeRecovery,openRecovery} from './recovery.js';
 import {openAccount,closeAccount} from './account.js';
 import {initializeSocial} from './social.js';
 import {openCommunity,closeCommunity} from './community.js';
@@ -16,7 +17,7 @@ function message(text, field) {
 }
 function switchMode(next) {
   if (busy) return;
-  mode = next;
+  mode = next;$('auth-home').hidden=true;$('auth-fields').hidden=false;
   $('account-form').reset();
   message('');
   document.querySelectorAll('.reveal').forEach(button => { $(button.dataset.target).type = 'password'; button.textContent = '보기'; button.setAttribute('aria-pressed', 'false'); });
@@ -46,7 +47,10 @@ async function api(route, input) {
   return result;
 }
 $('switch-mode').addEventListener('click', () => switchMode(mode === 'signup' ? 'login' : 'signup'));
-$('forgot-password').addEventListener('click', () => $('password-help-dialog').showModal());
+$('auth-back').addEventListener('click',()=>{if(busy)return;switchMode('login');$('auth-fields').hidden=true;$('auth-home').hidden=false;});
+$('home-login').addEventListener('click',()=>switchMode('login'));
+$('home-signup').addEventListener('click',()=>switchMode('signup'));
+$('forgot-password').addEventListener('click', () => openRecovery(api));
 $('close-password-help').addEventListener('click', () => $('password-help-dialog').close());
 document.querySelectorAll('.reveal').forEach(button => button.addEventListener('click', () => {
   const input = $(button.dataset.target);
@@ -85,5 +89,6 @@ $('logout-button').addEventListener('click', async () => {
   finally { $('logout-button').disabled = false; }
 });
 switchMode('login');
+initializeRecovery(api);
 initializeSocial(api,dashboard);
 api('me').then(({ user }) => { if (user) dashboard(user); }).catch(() => message('서버에 연결할 수 없습니다. 새로고침해 주세요.'));
