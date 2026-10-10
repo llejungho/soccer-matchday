@@ -15,9 +15,10 @@ function message(text, field) {
   document.querySelectorAll('input').forEach(input => input.removeAttribute('aria-invalid'));
   if (field) { $(field).setAttribute('aria-invalid', 'true'); $(field).focus(); }
 }
-function switchMode(next) {
+function switchMode(next,recordHistory=true) {
   if (busy) return;
-  mode = next;$('auth-home').hidden=true;$('auth-fields').hidden=false;
+  if(recordHistory){const url=new URL(location.href);if((url.searchParams.get('auth')||'login')!==next){url.searchParams.set('auth',next);history.pushState({auth:next},'',url);}}
+  mode = next==='home'?'login':next;$('auth-home').hidden=next!=='home';$('auth-fields').hidden=next==='home';
   $('account-form').reset();
   message('');
   document.querySelectorAll('.reveal').forEach(button => { $(button.dataset.target).type = 'password'; button.textContent = '보기'; button.setAttribute('aria-pressed', 'false'); });
@@ -47,7 +48,7 @@ async function api(route, input) {
   return result;
 }
 $('switch-mode').addEventListener('click', () => switchMode(mode === 'signup' ? 'login' : 'signup'));
-$('auth-back').addEventListener('click',()=>{if(busy)return;switchMode('login');$('auth-fields').hidden=true;$('auth-home').hidden=false;});
+$('auth-back').addEventListener('click',()=>{if(busy)return;switchMode('home');});
 $('home-login').addEventListener('click',()=>switchMode('login'));
 $('home-signup').addEventListener('click',()=>switchMode('signup'));
 $('forgot-password').addEventListener('click', () => openRecovery(api));
@@ -88,7 +89,9 @@ $('logout-button').addEventListener('click', async () => {
   } catch { $('dashboard-message').textContent = '로그아웃하지 못했습니다. 다시 시도해 주세요.'; $('dashboard-message').hidden = false; }
   finally { $('logout-button').disabled = false; }
 });
-switchMode('login');
+const authView=()=>{const view=new URL(location.href).searchParams.get('auth');return ['home','signup','login'].includes(view)?view:'login';};
+window.addEventListener('popstate',()=>{if(!$('dashboard-view').hidden)return;switchMode(authView(),false);});
+switchMode(authView(),false);
 initializeRecovery(api);
 initializeSocial(api,dashboard);
 api('me').then(({ user }) => { if (user) dashboard(user); }).catch(() => message('서버에 연결할 수 없습니다. 새로고침해 주세요.'));

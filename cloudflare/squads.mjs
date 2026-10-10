@@ -79,6 +79,14 @@ export async function handleSquads(db,route,user,input) {
   if(input.squadId&&!existing)return answer(404,{error:'이 팀의 스쿼드가 아닙니다.'});
   const outcomes=existing?(await db.prepare('SELECT quarter,outcome FROM squad_outcomes WHERE squad_id=? ORDER BY quarter').all(existing.id)):[];
   if(route==='/api/squads/load')return existing?answer(200,{id:existing.id,config:JSON.parse(existing.config),result:existing.result?JSON.parse(existing.result):null,outcomes}):answer(404,{error:'스쿼드를 선택해 주세요.'});
+  if(route==='/api/squads/delete'){
+    if(!existing)return answer(400,{error:'삭제할 스쿼드를 선택해 주세요.'});
+    await db.transaction(async()=>{
+      for(const table of ['squad_shares','squad_outcomes'])await db.prepare(`DELETE FROM ${table} WHERE squad_id=?`).run(existing.id);
+      await db.prepare('DELETE FROM squads WHERE id=? AND team_id=?').run(existing.id,team.id);
+    });
+    return answer(200,{ok:true});
+  }
   if(route==='/api/squads/outcomes') {
     if(!existing?.result||!Array.isArray(input.outcomes)||input.outcomes.length!==JSON.parse(existing.result).quarters.length)return answer(400,{error:'쿼터별 경기 결과를 확인하세요.'});
     const response=await db.transaction(async()=>{
