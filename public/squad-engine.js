@@ -46,10 +46,12 @@ const readScore=(player,field)=>field.basicKey?player.ratings?.[field.basicKey]|
 export function tacticWeights(tactic,fields=defaultBasicFields.map(f=>({...f,basicKey:f.key}))) {
   const text=(`${tactic?.name||''} ${tactic?.concept||''} ${tactic?.traits||''}`).replace(/\s/g,'');const weights={};
   for(const field of fields){const name=field.name.replace(/\s/g,''),key=scoreKey(field);
-    if(text.includes(name)||(/^(공격력|수비력|전체실력)$/.test(name)&&text.includes(name==='전체실력'?'실력':name.slice(0,-1))))weights[key]=2;
+    if(tactic?.ratingFields?.includes(key))weights[key]=4;
+    if(text.includes(name)||(/^(공격력|수비력|전체실력)$/.test(name)&&text.includes(name==='전체실력'?'실력':name.slice(0,-1))))weights[key]=Math.max(weights[key]||0,2);
     if(/압박/.test(text)&&/체력|적극성/.test(name))weights[key]=2;
     if(/킥.*런/.test(text)&&/롱킥|롱패스|헤딩|제공권|공중볼|스피드|속도/.test(name))weights[key]=2;
     if(/역습/.test(text)){if(/수비|속도|스피드/.test(name))weights[key]=2;else if(/공격/.test(name))weights[key]=1;}
+    if(tactic?.ratingFields?.includes(key))weights[key]=4;
   }return weights;
 }
 function quality(player,slot,tactic,fields,history,q) {

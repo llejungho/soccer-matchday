@@ -1,3 +1,4 @@
+import {showAccount,showAdmin} from './account.js';
 import {showCommunity} from './community.js';
 import { updateSquadContext, closeSquads, showSquads } from './squads.js';
 const $ = id => document.getElementById(id);
@@ -11,7 +12,7 @@ const positionNames = ['CF', 'SS', 'LW', 'RW', 'AM', 'LM', 'CM', 'RM', 'DM', 'LW
 function playerSubview(view){for(const name of ['roster','add','fields'])$('manage-'+name).hidden=name!==view;for(const b of document.querySelectorAll('[data-player-view]'))b.setAttribute('aria-current',b.dataset.playerView===view?'page':'false');}
 for(const b of document.querySelectorAll('[data-player-view]'))b.addEventListener('click',()=>{if(!operationBusy)playerSubview(b.dataset.playerView);});
 let profileDraft = null;
-let editingTactic = null;
+let editingTactic = null;let selectedTacticRatings=[];
 let editingField = null;
 function notice(text, error = false) {
   $('dashboard-message').hidden = !text;
@@ -27,9 +28,11 @@ function node(tag, text, className) {
 function page(name) {
   closeProfile();
   currentPage = name;
-  for (const key of ['create', 'manage', 'select', 'tactics', 'transfer', 'squad', 'notices', 'free']) $('page-' + key).hidden = key !== name;
+  for (const key of ['create', 'manage', 'select', 'tactics', 'my', 'admin', 'squad', 'notices', 'free']) $('page-' + key).hidden = key !== name;
   document.querySelectorAll('.sidebar [data-page]').forEach(button => { button.classList.toggle('active', button.dataset.page === name); button.setAttribute('aria-current', button.dataset.page === name ? 'page' : 'false'); });
   const titles = { create: ['팀 생성', '함께 뛸 우리 팀을 만들어 보세요.'], manage: ['선수 관리', '평가 항목을 정하고 선수와 프로필을 관리하세요.'], select: ['팀 선택', '오늘 관리할 팀을 선택하세요.'], tactics: ['팀 전술', '쿼터마다 활용할 우리 팀의 전술 컨셉을 준비하세요.'], transfer: ['팀 이관', '팀을 다른 감독에게 넘기거나 받은 요청을 확인하세요.'] };
+  titles.my=['마이페이지','닉네임·비밀번호와 팀 이관을 관리하세요.'];titles.admin=['관리자페이지','가입된 ID와 닉네임을 확인하세요.'];if(name==='my')showAccount();if(name==='admin')showAdmin();
+  if(name==='manage')playerSubview('fields');
   titles.notices=['공지사항','서비스 소식과 운영 안내를 확인하세요.']; titles.free=['자유게시판','닉네임으로 이야기를 나누세요.'];
   if(name==='notices'||name==='free')showCommunity(name);
   titles.squad = ['스쿼드', '참석자와 쿼터별 컨셉을 정하고 자동 배치·수정·공유하세요.'];
@@ -38,7 +41,7 @@ function page(name) {
   if(name === 'squad') showSquads();
 }
 function render(next) {
-  if (state?.selectedTeam?.id !== next.selectedTeam?.id) { resetTactic(); resetField(); playerSubview('roster'); }
+  if (state?.selectedTeam?.id !== next.selectedTeam?.id) { resetTactic(); resetField(); playerSubview('fields'); }
   if (editingField && !(editingField.builtinKey?next.basicFields.some(f=>f.key===editingField.builtinKey):next.customFields.some(f=>f.id===editingField.fieldId))) resetField();
   if (editingTactic && !next.tactics.some(tactic => tactic.id === editingTactic.id)) resetTactic();
   if (profileDraft && (next.selectedTeam?.id !== profileDraft.teamId || !next.players.some(player => player.id === profileDraft.playerId))) closeProfile();
@@ -300,7 +303,7 @@ function renderChemistry() {
 }
 function resetTactic() {
   editingTactic = null;
-  $('tactic-form').reset();
+  $('tactic-form').reset();selectedTacticRatings=[];$('tactic-rating-options').replaceChildren();$('tactic-rating-options').hidden=true;
   $('tactic-form-title').textContent = '전술 추가';
   $('save-tactic').textContent = '전술 추가 →';
   $('cancel-tactic').hidden = true;
@@ -326,12 +329,13 @@ function renderTeamConfig() {
     const card = node('article', null, 'config-card');
     card.append(node('h3', tactic.name));
     if (tactic.concept) card.append(node('p', `컨셉 · ${tactic.concept}`));
-    card.append(node('p', `우선 배치할 선수 · ${tactic.traits}`));
+    const selectedNames=[...state.basicFields.map(f=>({...f,value:f.key})),...state.customFields.map(f=>({...f,value:'custom:'+f.id}))].filter(f=>(tactic.ratingFields||[]).includes(f.value)).map(f=>f.name);
+    card.append(node('p', `우선 배치할 선수 · ${[selectedNames.length?selectedNames.join('·')+' 점수가 높은 선수':'',tactic.traits].filter(Boolean).join(' / ')||'미설정'}`));
     const actions = node('div', null, 'config-actions');
     const edit = node('button', '수정', 'secondary'); edit.type = 'button';
     edit.addEventListener('click', () => {
       editingTactic = { id: tactic.id, teamId: state.selectedTeam.id };
-      $('tactic-name').value = tactic.name; $('tactic-concept').value = tactic.concept; $('tactic-traits').value = tactic.traits;
+      selectedTacticRatings=[...(tactic.ratingFields||[])];renderTacticRatings();$('tactic-name').value = tactic.name; $('tactic-concept').value = tactic.concept; $('tactic-traits').value = tactic.traits;
       $('tactic-form-title').textContent = '전술 수정'; $('save-tactic').textContent = '전술 저장 →'; $('cancel-tactic').hidden = false;
       $('tactic-name').focus();
     });
@@ -352,7 +356,7 @@ function renderTeamConfig() {
 $('tactic-form').addEventListener('submit', event => {
   event.preventDefault();
   if (!state?.selectedTeam) return;
-  mutate('tactics/save', { teamId: state.selectedTeam.id, ...(editingTactic ? {tacticId: editingTactic.id} : {}), name: $('tactic-name').value, concept: $('tactic-concept').value, traits: $('tactic-traits').value }, '팀 전술을 저장했습니다.', resetTactic);
+  mutate('tactics/save', { teamId: state.selectedTeam.id, ...(editingTactic ? {tacticId: editingTactic.id} : {}), name: $('tactic-name').value, concept: $('tactic-concept').value, traits: $('tactic-traits').value, ratingFields:selectedTacticRatings }, '팀 전술을 저장했습니다.', resetTactic);
 });
 $('cancel-tactic').addEventListener('click', resetTactic);
 $('custom-field-form').addEventListener('submit', event => {
@@ -370,3 +374,6 @@ $('player-profile-form').addEventListener('submit', event => {
   if (!profileDraft || operationBusy) return;
   mutate('players/update', { ...profileDraft, name: $('profile-name').value, comment: $('profile-comment').value }, '선수 프로필을 저장했습니다.', closeProfile);
 });
+
+function renderTacticRatings(){const root=$('tactic-rating-options');root.replaceChildren();if(!state?.selectedTeam)return;const fields=[...state.basicFields.map(f=>({...f,value:f.key})),...state.customFields.map(f=>({...f,value:'custom:'+f.id}))];selectedTacticRatings=selectedTacticRatings.filter(key=>fields.some(f=>f.value===key));if(!fields.length)root.append(node('p','선수 관리 → 선수 평가 항목에서 기준을 먼저 추가하세요.','hint'));for(const f of fields){const label=node('label',null,'squad-check'),check=node('input');check.type='checkbox';check.checked=selectedTacticRatings.includes(f.value);check.addEventListener('change',()=>{selectedTacticRatings=selectedTacticRatings.filter(key=>key!==f.value);if(check.checked)selectedTacticRatings.push(f.value);});label.append(check,node('span',f.name));root.append(label);}root.hidden=false;}
+$('load-tactic-ratings').addEventListener('click',renderTacticRatings);

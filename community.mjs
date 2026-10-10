@@ -26,28 +26,38 @@ const fail=(status,error,field)=>({status,body:{error,...(field?{field}:{})}});
 const ok=body=>({status:200,body});
 const validId=id=>Number.isSafeInteger(id)&&id>0;
 export async function handleCommunity(db,path,user,input={}) {
+  if(!input||typeof input!=='object'||Array.isArray(input))return fail(400,'입력 내용을 확인해 주세요.');
   if(path==='/api/community/nickname-check') {
     const email=typeof input.email==='string'?input.email.trim().toLowerCase():'';
     const error=nicknameError(input.nickname,email);if(error)return fail(400,error,'nickname');
     const exists=await db.prepare('SELECT id FROM users WHERE nickname_key=?').get(nicknameKey(input.nickname));
-    return ok({available:!exists});
+    return ok({available:!exists||exists.id===user?.id});
   }
   if(path==='/api/community/list') {
     if(!['notices','free'].includes(input.board))return fail(400,'게시판을 선택하세요.');
     const page=Number.isSafeInteger(input.page)&&input.page>0?Math.min(input.page,100000):1;
-    const posts=await db.prepare("SELECT p.id,p.title,p.created_at AS createdAt,p.updated_at AS updatedAt,COALESCE(u.nickname,'회원'||u.id) AS nickname,(SELECT COUNT(*) FROM board_comments c WHERE c.post_id=p.id) AS commentCount FROM board_posts p JOIN users u ON u.id=p.author_id WHERE p.board=? ORDER BY p.id DESC LIMIT 20 OFFSET ?").all(input.board,(page-1)*20);
+    const posts=await db.prepare("SELECT p.id,p.title,p.views,p.images,p.created_at AS createdAt,p.updated_at AS updatedAt,COALESCE(u.nickname,'회원'||u.id) AS nickname,(SELECT COUNT(*) FROM board_comments c WHERE c.post_id=p.id) AS commentCount,(SELECT COUNT(*) FROM board_recommendations r WHERE r.post_id=p.id) AS recommendations FROM board_posts p JOIN users u ON u.id=p.author_id WHERE p.board=? ORDER BY p.id DESC LIMIT 20 OFFSET ?").all(input.board,(page-1)*20);
     const total=(await db.prepare('SELECT COUNT(*) AS n FROM board_posts WHERE board=?').get(input.board)).n;
     return ok({posts,total,page,canWrite:!!user&&(input.board==='free'||isAdmin(user))});
   }
   if(path==='/api/community/post') {
     if(!validId(input.postId))return fail(400,'글을 선택하세요.');
-    const post=await db.prepare("SELECT p.id,p.board,p.author_id AS authorId,p.title,p.content,p.created_at AS createdAt,p.updated_at AS updatedAt,COALESCE(u.nickname,'회원'||u.id) AS nickname FROM board_posts p JOIN users u ON u.id=p.author_id WHERE p.id=?").get(input.postId);
+    if(input.view===true&&user){const viewer='user:'+user.id,now=Date.now(),cutoff=now-86400000;const action=async()=>{await db.prepare('UPDATE board_posts SET views=views+1 WHERE id=? AND NOT EXISTS(SELECT 1 FROM board_views WHERE post_id=? AND viewer_key=? AND viewed_at>?)').run(input.postId,input.postId,viewer,cutoff);await db.prepare('INSERT INTO board_views(post_id,viewer_key,viewed_at) SELECT id,?,? FROM board_posts WHERE id=? ON CONFLICT(post_id,viewer_key) DO UPDATE SET viewed_at=excluded.viewed_at WHERE board_views.viewed_at<=?').run(viewer,now,input.postId,cutoff);};if(db.transaction)await db.transaction(action);else await action();}
+    const post=await db.prepare("SELECT p.id,p.board,p.views,p.images,p.guide_key AS guideKey,p.author_id AS authorId,p.title,p.content,p.created_at AS createdAt,p.updated_at AS updatedAt,COALESCE(u.nickname,'회원'||u.id) AS nickname,(SELECT COUNT(*) FROM board_recommendations r WHERE r.post_id=p.id) AS recommendations FROM board_posts p JOIN users u ON u.id=p.author_id WHERE p.id=?").get(input.postId);
     if(!post)return fail(404,'삭제되었거나 없는 글입니다.');
     const comments=await db.prepare("SELECT c.id,c.author_id AS authorId,c.content,c.created_at AS createdAt,c.updated_at AS updatedAt,COALESCE(u.nickname,'회원'||u.id) AS nickname FROM board_comments c JOIN users u ON u.id=c.author_id WHERE c.post_id=? ORDER BY c.id").all(post.id);
     const permission=item=>({...item,canManage:!!user&&(isAdmin(user)||item.authorId===user.id)});
-    return ok({post:permission(post),comments:comments.map(permission)});
+    const recommended=user?!!await db.prepare('SELECT 1 FROM board_recommendations WHERE post_id=? AND user_id=?').get(post.id,user.id):false;
+    return ok({post:{...permission(post),images:JSON.parse(post.images),recommended},comments:comments.map(permission)});
   }
   if(!user)return fail(401,'로그인한 뒤 작성해 주세요.');
+  if(path==='/api/community/recommend'){
+    if(!validId(input.postId)||!await db.prepare('SELECT id FROM board_posts WHERE id=?').get(input.postId))return fail(404,'없는 글입니다.');
+    const previous=await db.prepare('SELECT 1 FROM board_recommendations WHERE post_id=? AND user_id=?').get(input.postId,user.id);
+    if(previous)await db.prepare('DELETE FROM board_recommendations WHERE post_id=? AND user_id=?').run(input.postId,user.id);
+    else await db.prepare('INSERT INTO board_recommendations(post_id,user_id) VALUES(?,?)').run(input.postId,user.id);
+    return ok({recommended:!previous,recommendations:(await db.prepare('SELECT COUNT(*) AS n FROM board_recommendations WHERE post_id=?').get(input.postId)).n});
+  }
   if(path==='/api/community/quota-default') {
     if(!validId(input.playerId))return fail(400,'선수를 선택하세요.');
     const player=await db.prepare('SELECT p.id FROM players p JOIN teams t ON t.id=p.team_id WHERE p.id=? AND t.owner_id=?').get(input.playerId,user.id);
@@ -78,9 +88,9 @@ export async function handleCommunity(db,path,user,input={}) {
     const post=await db.prepare('SELECT * FROM board_posts WHERE id=?').get(input.postId);if(!post)return fail(404,'없는 글입니다.');
     if(!isAdmin(user)&&(post.author_id!==user.id||post.board==='notices'))return fail(403,'작성자 또는 관리자만 삭제할 수 있습니다.');
     // Explicit cleanup also covers local databases without foreign_keys enabled.
-    const action=async()=>{await db.prepare('DELETE FROM board_comments WHERE post_id=?').run(post.id);await db.prepare('DELETE FROM board_posts WHERE id=?').run(post.id);return ok({ok:true});};
+    const action=async()=>{await db.prepare('DELETE FROM board_views WHERE post_id=?').run(post.id);await db.prepare('DELETE FROM board_recommendations WHERE post_id=?').run(post.id);await db.prepare('DELETE FROM board_comments WHERE post_id=?').run(post.id);await db.prepare('DELETE FROM board_posts WHERE id=?').run(post.id);return ok({ok:true});};
     if(db.transaction)return await db.transaction(action);
-    db.exec('BEGIN');try{db.prepare('DELETE FROM board_comments WHERE post_id=?').run(post.id);db.prepare('DELETE FROM board_posts WHERE id=?').run(post.id);db.exec('COMMIT');return ok({ok:true});}catch(e){db.exec('ROLLBACK');throw e;}
+    db.exec('BEGIN');try{db.prepare('DELETE FROM board_views WHERE post_id=?').run(post.id);db.prepare('DELETE FROM board_recommendations WHERE post_id=?').run(post.id);db.prepare('DELETE FROM board_comments WHERE post_id=?').run(post.id);db.prepare('DELETE FROM board_posts WHERE id=?').run(post.id);db.exec('COMMIT');return ok({ok:true});}catch(e){db.exec('ROLLBACK');throw e;}
   }
   if(path==='/api/community/comment-save'||path==='/api/community/comment-delete') {
     if(input.commentId!==undefined) {

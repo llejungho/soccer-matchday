@@ -1,3 +1,5 @@
+import {handleAccount} from '../account.mjs';
+import {handleSocial} from '../social-auth.mjs';
 import { handleCommunity,nicknameError,nicknameKey,publicUser} from '../community.mjs';
 import {randomBytes,scrypt,timingSafeEqual,createHash} from 'node:crypto';
 import {promisify} from 'node:util';
@@ -63,6 +65,7 @@ async function auth(binding,request,path,input){
   const db=await new Database(binding).start();
   return json(200,{user:publicUser(user)},{'Set-Cookie':await signIn(db,request,user)});
 }
+async function domainResponse(db,request,result){const body={...result.body};const response=new Response(result.body===null?null:JSON.stringify(body),{status:result.status,headers:{...headers,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...result.headers}});if(body.signInUser||body.renewSession){const account=body.signInUser?await db.prepare('SELECT id,email,nickname FROM users WHERE id=?').get(body.signInUser):body.user;response.headers.append('Set-Cookie',await signIn(db,request,account));delete body.signInUser;delete body.renewSession;return new Response(JSON.stringify(body),{status:result.status,headers:response.headers});}return response;}
 export default {
   async fetch(request,env){
     const url=new URL(request.url),path=url.pathname;
@@ -87,15 +90,18 @@ export default {
           return json(200,{ok:true},{'Set-Cookie':cookie(request,'',0)});
         }
         let result;
-        if(path.startsWith('/api/community/'))result=await handleCommunity(db,path,user,input);
+        if(path.startsWith('/api/account/'))result=await handleAccount(db,path,user,input);
+        else if(path.startsWith('/api/social/'))result=await handleSocial(db,request,env,user,input);
+        else if(path.startsWith('/api/community/'))result=await handleCommunity(db,path,user,input);
         else if(path.startsWith('/api/teams/'))result=await handleTeams(db,path,user,input);
         else if(path.startsWith('/api/squads/'))result=await handleSquads(db,path,user,input);
         else return json(404,{error:'찾을 수 없는 요청입니다.'});
-        await db.verify();return json(result.status,result.body);
+        await db.verify();return await domainResponse(db,request,result);
       }
       if(request.method==='GET'){
         const db=await new Database(env.DB).start();let result;
-        if(path==='/api/me')result={status:200,body:{user:publicUser(await userFor(db,request))}};
+        if(path.startsWith('/api/social/'))result=await handleSocial(db,request,env,await userFor(db,request));
+        else if(path==='/api/me')result={status:200,body:{user:publicUser(await userFor(db,request))}};
         else if(path==='/api/teams/state')result=await handleTeams(db,path,await userFor(db,request),{});
         else if(path.startsWith('/api/shared/'))result=await sharedSquad(db,path.slice('/api/shared/'.length));
         else return json(404,{error:'찾을 수 없는 요청입니다.'});
@@ -104,6 +110,9 @@ export default {
       return json(405,{error:'허용되지 않은 요청입니다.'});
     }catch(error){
       if(error instanceof Conflict)return json(409,{error:error.message});
+      if(error.status)return json(error.status,{error:error.message});
+      if(error.message.includes('UNIQUE'))return json(409,{error:'닉네임 또는 SNS 계정이 이미 등록되어 있습니다.'});
+      if(error.message.startsWith('SNS 인증'))return json(400,{error:error.message});
       if(error instanceof SyntaxError)return json(400,{error:'입력 내용을 확인해 주세요.'});
       console.error('Request failed:',error.code||error.name);
       return json(500,{error:'처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'});

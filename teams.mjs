@@ -1,4 +1,5 @@
 export function initializeTeams(db) {
+
   db.exec('CREATE TABLE IF NOT EXISTS player_quota_defaults(player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,user_id INTEGER NOT NULL REFERENCES users(id),quota REAL NOT NULL CHECK(quota BETWEEN 0 AND 12 AND quota*2=CAST(quota*2 AS INTEGER)),PRIMARY KEY(player_id,user_id));');
   db.exec(`PRAGMA foreign_keys=ON;
     CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id), name TEXT NOT NULL, color TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -14,6 +15,7 @@ export function initializeTeams(db) {
     CREATE TABLE IF NOT EXISTS team_tactics(id INTEGER PRIMARY KEY AUTOINCREMENT, team_id INTEGER NOT NULL REFERENCES teams(id), name TEXT NOT NULL, concept TEXT NOT NULL, traits TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS team_rating_fields(id INTEGER PRIMARY KEY AUTOINCREMENT, team_id INTEGER NOT NULL REFERENCES teams(id), name TEXT NOT NULL, UNIQUE(team_id,name));
     CREATE TABLE IF NOT EXISTS player_custom_ratings(player_id INTEGER NOT NULL REFERENCES players(id), field_id INTEGER NOT NULL REFERENCES team_rating_fields(id) ON DELETE CASCADE, score INTEGER NOT NULL CHECK(score BETWEEN 1 AND 5), PRIMARY KEY(player_id,field_id));`);
+  if(!db.prepare('PRAGMA table_info(team_tactics)').all().some(c=>c.name==='rating_fields'))db.exec("ALTER TABLE team_tactics ADD COLUMN rating_fields TEXT NOT NULL DEFAULT '[]'");
   db.exec(`CREATE TABLE IF NOT EXISTS team_basic_rating_fields(team_id INTEGER NOT NULL REFERENCES teams(id),key TEXT NOT NULL,name TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(team_id,key));`);
 }
 const positionsAllowed = ['CF', 'SS', 'LW', 'RW', 'AM', 'LM', 'CM', 'RM', 'DM', 'LWB', 'RWB', 'CB', 'GK'];
@@ -40,7 +42,8 @@ export function state(db, user) {
   const players = selected ? db.prepare('SELECT p.id, p.name, f.positions, f.stamina, f.aggression, f.attack, f.defense, f.overall, f.comment FROM players p LEFT JOIN player_profiles f ON f.player_id=p.id WHERE p.team_id=? ORDER BY p.id').all(selected.id).map(player => ({ id: player.id, name: player.name, positions: JSON.parse(player.positions || '[]'), ratings: Object.fromEntries(ratingKeys.map(key => [key, player[key]])), comment: player.comment || '', chemistry: Object.fromEntries(['good','bad'].map(kind => [kind, relationships.filter(pair => pair.kind === kind && (pair.player_a === player.id || pair.player_b === player.id)).map(pair => pair.player_a === player.id ? pair.player_b : pair.player_a)])) })) : [];
   const incoming = db.prepare("SELECT x.id, t.name, t.color, u.email AS senderEmail FROM team_transfers x JOIN teams t ON t.id=x.team_id JOIN users u ON u.id=x.sender_id WHERE x.recipient_id=? AND x.status='pending' AND t.owner_id=x.sender_id ORDER BY x.id DESC").all(user.id);
   const outgoing = db.prepare("SELECT x.id, x.team_id AS teamId, t.name, u.email AS recipientEmail FROM team_transfers x JOIN teams t ON t.id=x.team_id JOIN users u ON u.id=x.recipient_id WHERE x.sender_id=? AND x.status='pending' AND t.owner_id=x.sender_id").all(user.id);
-  const tactics = selected ? db.prepare('SELECT id,name,concept,traits FROM team_tactics WHERE team_id=? ORDER BY id').all(selected.id) : [];
+  const tactics = selected ? db.prepare('SELECT id,name,concept,traits,rating_fields FROM team_tactics WHERE team_id=? ORDER BY id').all(selected.id) : [];
+  for(const tactic of tactics)tactic.ratingFields=JSON.parse(tactic.rating_fields||'[]');
   const customFields = selected ? db.prepare('SELECT id,name FROM team_rating_fields WHERE team_id=? ORDER BY id').all(selected.id) : [];
   const customScores = selected ? db.prepare('SELECT r.* FROM player_custom_ratings r JOIN players p ON p.id=r.player_id JOIN team_rating_fields f ON f.id=r.field_id WHERE p.team_id=? AND f.team_id=?').all(selected.id, selected.id) : [];
   const quotaDefaults=db.prepare('SELECT player_id,quota FROM player_quota_defaults WHERE user_id=?').all(user.id);
@@ -101,11 +104,13 @@ export function handleTeams(db, route, user, input) {
     const name = typeof input.name === 'string' ? input.name.trim() : '';
     const concept = typeof input.concept === 'string' ? input.concept.trim() : '';
     const traits = typeof input.traits === 'string' ? input.traits.trim() : '';
-    if (!name || name.length > 60 || concept.length > 1000 || !traits || traits.length > 1000) return failure(400, '전술명은 1~60자, 컨셉과 선수 성향은 각각 1,000자 이내로 작성해 주세요. 선수 성향은 필수입니다.');
+    if (!name || name.length > 60 || concept.length > 1000 || (!traits&&(!Array.isArray(input.ratingFields)||!input.ratingFields.length)) || traits.length > 1000) return failure(400, '전술명은 1~60자, 컨셉과 선수 성향은 각각 1,000자 이내로 작성해 주세요. 선수 성향은 필수입니다.');
+    const allowed=[...basic.map(f=>f.key),...(db.prepare('SELECT id FROM team_rating_fields WHERE team_id=?').all(team.id)).map(f=>'custom:'+f.id)];
+    const ratingFields=input.ratingFields??[];if(!Array.isArray(ratingFields)||new Set(ratingFields).size!==ratingFields.length||ratingFields.some(key=>!allowed.includes(key)))return failure(400,'현재 팀의 평가 항목을 선택하세요.');
     if (input.tacticId !== undefined) {
       if (!db.prepare('SELECT id FROM team_tactics WHERE id=? AND team_id=?').get(input.tacticId, team.id)) return failure(404, '이 팀의 전술이 아닙니다.');
-      db.prepare('UPDATE team_tactics SET name=?,concept=?,traits=? WHERE id=?').run(name, concept, traits, input.tacticId);
-    } else db.prepare('INSERT INTO team_tactics(team_id,name,concept,traits) VALUES(?,?,?,?)').run(team.id, name, concept, traits);
+      db.prepare('UPDATE team_tactics SET name=?,concept=?,traits=?,rating_fields=? WHERE id=?').run(name, concept, traits, JSON.stringify(ratingFields), input.tacticId);
+    } else db.prepare('INSERT INTO team_tactics(team_id,name,concept,traits,rating_fields) VALUES(?,?,?,?,?)').run(team.id, name, concept, traits, JSON.stringify(ratingFields));
     return response(200, state(db, user));
   }
   if (route === '/api/teams/tactics/delete') {

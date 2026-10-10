@@ -35,6 +35,11 @@ test('tactics and custom ratings persist, isolate teams, delete scores and reset
     call('ratings/add', {teamId:otherTeamId,name:'멘탈'});
     call('select', {teamId:otherTeamId}); const otherFieldId = state().customFields[0].id;
     assert.deepEqual(state().tactics, []); call('select', {teamId});
+    assert.equal(call('tactics/save', {...tactic,tacticId,traits:'',ratingFields:['stamina','custom:'+fieldId]}).status,200);
+    assert.deepEqual(state().tactics[0].ratingFields,['stamina','custom:'+fieldId]);
+    assert.equal(call('tactics/save', {...tactic,tacticId,ratingFields:['custom:'+otherFieldId]}).status,400);
+    assert.equal(call('tactics/save', {...tactic,tacticId,ratingFields:['stamina','stamina']}).status,400);
+    call('tactics/save', {...tactic,tacticId,name:'킥 & 런',traits:'롱킥·헤딩이 좋은 선수'});
     const profile = {teamId,playerId,name:'선수',positions:[],ratings:{stamina:null,aggression:null,attack:null,defense:null,overall:null},customRatings:{[fieldId]:5}};
     assert.equal(call('players/update', profile).status, 200);
     assert.equal(call('ratings/update', {teamId,fieldId,name:'스피드'}).status, 200);

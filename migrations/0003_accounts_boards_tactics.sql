@@ -1,0 +1,10 @@
+ALTER TABLE board_posts ADD COLUMN views INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE board_posts ADD COLUMN images TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE board_posts ADD COLUMN guide_key TEXT;
+ALTER TABLE team_tactics ADD COLUMN rating_fields TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE IF NOT EXISTS account_security_attempts(user_id INTEGER PRIMARY KEY REFERENCES users(id),count INTEGER NOT NULL,until INTEGER NOT NULL);CREATE TABLE IF NOT EXISTS social_identities(provider TEXT NOT NULL,subject TEXT NOT NULL,user_id INTEGER NOT NULL REFERENCES users(id),PRIMARY KEY(provider,subject),UNIQUE(user_id,provider));
+CREATE TABLE IF NOT EXISTS oauth_states(state_hash TEXT PRIMARY KEY,provider TEXT NOT NULL,verifier TEXT NOT NULL,expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_pending(token_hash TEXT PRIMARY KEY,provider TEXT NOT NULL,subject TEXT NOT NULL,email TEXT NOT NULL,expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS board_views(post_id INTEGER NOT NULL REFERENCES board_posts(id) ON DELETE CASCADE,viewer_key TEXT NOT NULL,viewed_at INTEGER NOT NULL,PRIMARY KEY(post_id,viewer_key));
+CREATE TABLE IF NOT EXISTS board_recommendations(post_id INTEGER NOT NULL REFERENCES board_posts(id) ON DELETE CASCADE,user_id INTEGER NOT NULL REFERENCES users(id),PRIMARY KEY(post_id,user_id));
+CREATE UNIQUE INDEX IF NOT EXISTS board_guide_key ON board_posts(guide_key);

@@ -4,10 +4,11 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {handleCommunity,initializeCommunity,nicknameError,nicknameKey} from '../community.mjs';
 import {defaultQuotas} from '../public/quota-defaults.js';
+import {initializeEnhancements} from '../enhancements.mjs';
 test('legacy nicknames, reserved admin name, ownership and administrator moderation',async()=>{
   const db=new DatabaseSync(':memory:');db.exec(readFileSync('migrations/0001_initial.sql','utf8'));
   const insert=db.prepare('INSERT INTO users(id,email,password_hash,salt) VALUES(?,?,?,?)');insert.run(1,'llee86@naver.com','hash','salt');insert.run(2,'a@test.com','hash','salt');insert.run(3,'b@test.com','hash','salt');
-  initializeCommunity(db);initializeCommunity(db);
+  initializeCommunity(db);initializeCommunity(db);initializeEnhancements(db);
   const admin=db.prepare('SELECT * FROM users WHERE id=1').get(),a=db.prepare('SELECT * FROM users WHERE id=2').get(),b=db.prepare('SELECT * FROM users WHERE id=3').get();assert.equal(admin.nickname,'관리자');assert.equal(a.nickname,'회원2');
   const call=(route,user,input)=>handleCommunity(db,'/api/community/'+route,user,input);
   try {
@@ -17,6 +18,13 @@ test('legacy nicknames, reserved admin name, ownership and administrator moderat
     assert.equal((await call('post-save',a,{board:'notices',title:'공지',content:'내용'})).status,403);
     const notice=(await call('post-save',admin,{board:'notices',title:'공지',content:'안내'})).body.postId;
     const id=(await call('post-save',a,{board:'free',title:'제목',content:'<script>alert(1)</script>'})).body.postId;
+    assert.equal((await call('post',a,{postId:id,view:true})).body.post.views,1);
+    assert.equal((await call('post',a,{postId:id,view:true})).body.post.views,1);
+    assert.equal((await call('post',b,{postId:id,view:true})).body.post.views,2);
+    assert.equal((await call('recommend',null,{postId:id})).status,401);
+    assert.equal((await call('recommend',a,{postId:id})).body.recommendations,1);
+    assert.equal((await call('recommend',b,{postId:id})).body.recommendations,2);
+    assert.equal((await call('recommend',a,{postId:id})).body.recommendations,1);
     const initial=await call('post',b,{postId:id});assert.equal(initial.body.post.nickname,'회원2');assert.equal(initial.body.post.canManage,false);assert.ok(!JSON.stringify(initial).includes('a@test.com'));
     for(const route of ['post-save','post-delete'])assert.equal((await call(route,b,{postId:id,title:'변조',content:'변조'})).status,403);
     assert.equal((await call('post-save',a,{postId:id,title:'내 글 수정',content:'내용'})).status,200);

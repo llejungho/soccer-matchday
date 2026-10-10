@@ -3,9 +3,14 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {initializeTeams,handleTeams} from '../teams.mjs';
 import {initializeSquads,handleSquads,sharedSquad} from '../squads.mjs';
-import {generate,totals,slotsFor} from '../public/squad-engine.js';
+import {generate,totals,slotsFor,tacticWeights} from '../public/squad-engine.js';
 const quarters=Array.from({length:4},()=>({formation:'442',tactic:null,tacticId:null}));
 const player=(id,pos,keeper=false,quota=2.5)=>({id,key:'p:'+id,name:'선수 '+id,positions:[pos],keeper,quota,ratings:{stamina:5,aggression:4},chemistry:{good:[],bad:[]},customRatings:{}});
+test('explicit selected criteria retain their priority after renaming and ignore deleted criteria',()=>{
+  const fields=[{basicKey:'stamina',name:'활동량'},{id:9,name:'멘탈'}];
+  assert.deepEqual(tacticWeights({name:'전방 압박',ratingFields:['stamina','custom:9']},fields),{stamina:4,'custom:9':4});
+  assert.deepEqual(tacticWeights({ratingFields:['stamina','custom:9']},fields.slice(0,1)),{stamina:4});
+});
 test('half-quarter quotas, fair allocation, keeper separation and no simultaneous duplicates',()=>{
   const players=Array.from({length:16},(_,i)=>player(i+1,['CF','CM','CB','LWB','RWB'][i%5]));players.push(player(17,'GK',true,4));
   const plan=generate(players,quarters,'individual');assert.ok(!plan.warnings.some(w=>w.includes('빈')||w.includes('요청')));

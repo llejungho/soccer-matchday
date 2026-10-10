@@ -1,3 +1,8 @@
+import {seedGuide} from './guide.mjs';
+import {handleAccount} from './account.mjs';
+import {handleSocial} from './social-auth.mjs';
+import {initializeEnhancements} from './enhancements.mjs';
+import {asyncDatabase} from './local-database.mjs';
 import {initializeCommunity, handleCommunity,nicknameError,nicknameKey,publicUser} from './community.mjs';
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
@@ -20,6 +25,7 @@ CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id INTEGE
 initializeTeams(db);
 initializeSquads(db);
 initializeCommunity(db);
+initializeEnhancements(db);seedGuide(db);
 const derive = promisify(scrypt);
 const digest = token => createHash('sha256').update(token).digest('hex');
 const attempts = new Map();
@@ -48,6 +54,7 @@ async function body(req) {
   }
   return JSON.parse(content);
 }
+async function socialOrAccount(req,res,url,input){const adapter=asyncDatabase(db),user=userFor(req),request=new Request('http://'+req.headers.host+req.url,{method:req.method,headers:req.headers});const result=url.pathname.startsWith('/api/account/')?await handleAccount(adapter,url.pathname,user,input):await handleSocial(adapter,request,process.env,user,input);const body={...result.body};if(body.signInUser||body.renewSession){signIn(res,body.signInUser?db.prepare('SELECT * FROM users WHERE id=?').get(body.signInUser):body.user);delete body.signInUser;delete body.renewSession;}for(const [key,value] of Object.entries(result.headers||{})){if(key==='Set-Cookie'&&res.getHeader(key))res.setHeader(key,[res.getHeader(key),value]);else res.setHeader(key,value);}return json(res,result.status,result.body===null?null:body);}
 const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
@@ -56,6 +63,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname.startsWith('/api/shared/')) {const result=sharedSquad(db,url.pathname.slice('/api/shared/'.length));return json(res,result.status,result.body);}
     if (req.method === 'GET' && url.pathname.startsWith('/share/')) {res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});return res.end(readFileSync(path.join(root,'public','shared.html')));}
+    if(req.method==='GET'&&url.pathname.startsWith('/api/social/'))return await socialOrAccount(req,res,url,{});
     if (url.pathname === '/api/me' && req.method === 'GET') return json(res, 200, { user: publicUser(userFor(req)) });
     if (url.pathname === '/api/teams/state' && req.method === 'GET') {
       const result = handleTeams(db, url.pathname, userFor(req), {});
@@ -65,7 +73,8 @@ const server = http.createServer(async (req, res) => {
       const expected = process.env.PUBLIC_ORIGIN || `http://${req.headers.host}`;
       if (req.headers.origin !== expected) return json(res, 403, { error: '허용되지 않은 요청입니다.' });
       if (!req.headers['content-type']?.startsWith('application/json')) return json(res, 415, { error: 'JSON 형식이 필요합니다.' });
-      if(url.pathname.startsWith('/api/community/')){const result=await handleCommunity(db,url.pathname,userFor(req),await body(req));return json(res,result.status,result.body);}
+      if(url.pathname.startsWith('/api/social/')||url.pathname.startsWith('/api/account/'))return await socialOrAccount(req,res,url,await body(req));
+      if(url.pathname.startsWith('/api/community/')){const result=await handleCommunity(asyncDatabase(db),url.pathname,userFor(req),await body(req));return json(res,result.status,result.body);}
       if (url.pathname.startsWith('/api/squads/')) {const result=handleSquads(db,url.pathname,userFor(req),await body(req));return json(res,result.status,result.body);}
       if (url.pathname.startsWith('/api/teams/')) {
         const result = handleTeams(db, url.pathname, userFor(req), await body(req));
@@ -112,7 +121,8 @@ const server = http.createServer(async (req, res) => {
       signIn(res, user);
       return json(res, 200, { user: publicUser(user) });
     }
-    const files = { '/community.js':['community.js','text/javascript'], '/quota-defaults.js':['quota-defaults.js','text/javascript'], '/squad-history.js': ['squad-history.js','text/javascript'], '/squads.js': ['squads.js', 'text/javascript'], '/squad-engine.js': ['squad-engine.js','text/javascript'], '/squad-view.js': ['squad-view.js','text/javascript'], '/shared.js': ['shared.js','text/javascript'], '/squads.css': ['squads.css','text/css'], '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/teams.js': ['teams.js', 'text/javascript'], '/teams.css': ['teams.css', 'text/css'], '/profiles.css': ['profiles.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
+    const files = { '/account.js':['account.js','text/javascript'], '/social.js':['social.js','text/javascript'], '/community.js':['community.js','text/javascript'], '/quota-defaults.js':['quota-defaults.js','text/javascript'], '/squad-history.js': ['squad-history.js','text/javascript'], '/squads.js': ['squads.js', 'text/javascript'], '/squad-engine.js': ['squad-engine.js','text/javascript'], '/squad-view.js': ['squad-view.js','text/javascript'], '/shared.js': ['shared.js','text/javascript'], '/squads.css': ['squads.css','text/css'], '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/teams.js': ['teams.js', 'text/javascript'], '/teams.css': ['teams.css', 'text/css'], '/profiles.css': ['profiles.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
+    if(req.method==='GET'&&/^\/guide\/[a-z0-9-]+\.png$/.test(url.pathname)){res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-cache'});return res.end(readFileSync(path.join(root,'public',url.pathname)));}
     if (req.method === 'GET' && files[url.pathname]) {
       const [file, type] = files[url.pathname];
       res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-cache' });
@@ -120,6 +130,9 @@ const server = http.createServer(async (req, res) => {
     }
     json(res, 404, { error: '페이지를 찾을 수 없습니다.' });
   } catch (error) {
+    if(error.status)return json(res,error.status,{error:error.message});
+    if(error.message.includes('UNIQUE'))return json(res,409,{error:'닉네임 또는 SNS 계정이 이미 등록되어 있습니다.'});
+    if(error.message.startsWith('SNS 인증'))return json(res,400,{error:error.message});
     if (error instanceof SyntaxError || error.message === 'BODY_LIMIT') return json(res, 400, { error: '입력 내용을 확인해 주세요.' });
     console.error('Request failed:', error.code || error.name);
     json(res, 500, { error: '처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' });

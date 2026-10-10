@@ -2,12 +2,15 @@ data/
 node_modules/
 .env
 .env.*
+.dev.vars
+.dev.vars.*
 !.env.example
 backups/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
 *.png
+!public/guide/*.png
 *.log
 dist/
 .wrangler/

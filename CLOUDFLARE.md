@@ -54,6 +54,12 @@ npx wrangler d1 execute matchday-db --remote --file data/exports/cloudflare-impo
 
 ## 운영 백업
 
+계정·SNS 연동·게시판 조회/추천·전술 평가항목 선택은 `0003_accounts_boards_tactics.sql`, 스크린샷 이용 가이드 공지는 `0004_squad_guide.sql`에 포함되어 있습니다. 배포 전에 `npx wrangler d1 migrations apply matchday-db --remote`로 적용하세요. 가이드는 기존 관리자 계정으로 한 번만 작성되며 기존 회원·팀·선수 데이터를 덮어쓰지 않습니다. 스크린샷은 `public/guide/`에서 빌드에 복사됩니다.
+
+SNS 앱 등록과 암호화 환경변수 설정은 [SOCIAL_LOGIN.md](SOCIAL_LOGIN.md)를 따르세요. 앱 키가 없는 제공자의 버튼은 준비 중으로 표시됩니다. `.dev.vars`와 비공개 데이터는 Git 및 빌드에서 제외됩니다.
+
+OAuth 권한으로 기본 export가 거절되는 환경에서는 `node scripts/backup-d1-query.mjs`가 단일 조회 스냅샷을 `data/backups/`에 저장합니다. 출력 파일에는 개인 데이터가 있으므로 공개하지 마세요.
+
 ```sh
 mkdir -p data/backups
 npx wrangler d1 export matchday-db --remote --output data/backups/cloudflare-backup.sql

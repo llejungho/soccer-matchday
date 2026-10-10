@@ -1,3 +1,5 @@
+import {openAccount,closeAccount} from './account.js';
+import {initializeSocial} from './social.js';
 import {openCommunity,closeCommunity} from './community.js';
 import { openManager, closeManager } from './teams.js';
 const $ = id => document.getElementById(id);
@@ -33,7 +35,7 @@ function dashboard(user, isNew = false) {
   $('auth-view').hidden = true;
   $('dashboard-view').hidden = false;
   $('account-email').textContent = `${user.nickname} · ${user.email}`;
-  openCommunity(api,user);
+  openCommunity(api,user);openAccount(api,user,updated=>{$('account-email').textContent=`${updated.nickname} · ${updated.email}`;openCommunity(api,updated);});
   $('account-form').reset();
   openManager(api, isNew);
 }
@@ -74,7 +76,7 @@ $('logout-button').addEventListener('click', async () => {
   $('dashboard-message').hidden = true;
   try {
     await api('logout', {});
-    closeManager();closeCommunity();
+    closeManager();closeCommunity();closeAccount();
     $('dashboard-view').hidden = true;
     $('auth-view').hidden = false;
     $('account-email').textContent = '';
@@ -83,4 +85,5 @@ $('logout-button').addEventListener('click', async () => {
   finally { $('logout-button').disabled = false; }
 });
 switchMode('login');
+initializeSocial(api,dashboard);
 api('me').then(({ user }) => { if (user) dashboard(user); }).catch(() => message('서버에 연결할 수 없습니다. 새로고침해 주세요.'));

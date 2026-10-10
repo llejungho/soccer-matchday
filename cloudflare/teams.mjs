@@ -23,7 +23,8 @@ export async function state(db, user, selectedId) {
   const players = selected ? (await db.prepare('SELECT p.id, p.name, f.positions, f.stamina, f.aggression, f.attack, f.defense, f.overall, f.comment FROM players p LEFT JOIN player_profiles f ON f.player_id=p.id WHERE p.team_id=? ORDER BY p.id').all(selected.id)).map(player => ({ id: player.id, name: player.name, positions: JSON.parse(player.positions || '[]'), ratings: Object.fromEntries(ratingKeys.map(key => [key, player[key]])), comment: player.comment || '', chemistry: Object.fromEntries(['good','bad'].map(kind => [kind, relationships.filter(pair => pair.kind === kind && (pair.player_a === player.id || pair.player_b === player.id)).map(pair => pair.player_a === player.id ? pair.player_b : pair.player_a)])) })) : [];
   const incoming = (await db.prepare("SELECT x.id, t.name, t.color, u.email AS senderEmail FROM team_transfers x JOIN teams t ON t.id=x.team_id JOIN users u ON u.id=x.sender_id WHERE x.recipient_id=? AND x.status='pending' AND t.owner_id=x.sender_id ORDER BY x.id DESC").all(user.id));
   const outgoing = (await db.prepare("SELECT x.id, x.team_id AS teamId, t.name, u.email AS recipientEmail FROM team_transfers x JOIN teams t ON t.id=x.team_id JOIN users u ON u.id=x.recipient_id WHERE x.sender_id=? AND x.status='pending' AND t.owner_id=x.sender_id").all(user.id));
-  const tactics = selected ? (await db.prepare('SELECT id,name,concept,traits FROM team_tactics WHERE team_id=? ORDER BY id').all(selected.id)) : [];
+  const tactics = selected ? (await db.prepare('SELECT id,name,concept,traits,rating_fields FROM team_tactics WHERE team_id=? ORDER BY id').all(selected.id)) : [];
+  for(const tactic of tactics)tactic.ratingFields=JSON.parse(tactic.rating_fields||'[]');
   const customFields = selected ? (await db.prepare('SELECT id,name FROM team_rating_fields WHERE team_id=? ORDER BY id').all(selected.id)) : [];
   const customScores = selected ? (await db.prepare('SELECT r.* FROM player_custom_ratings r JOIN players p ON p.id=r.player_id JOIN team_rating_fields f ON f.id=r.field_id WHERE p.team_id=? AND f.team_id=?').all(selected.id, selected.id)) : [];
   const quotaDefaults=await db.prepare('SELECT player_id,quota FROM player_quota_defaults WHERE user_id=?').all(user.id);
@@ -86,11 +87,13 @@ export async function handleTeams(db, route, user, input) {
     const name = typeof input.name === 'string' ? input.name.trim() : '';
     const concept = typeof input.concept === 'string' ? input.concept.trim() : '';
     const traits = typeof input.traits === 'string' ? input.traits.trim() : '';
-    if (!name || name.length > 60 || concept.length > 1000 || !traits || traits.length > 1000) return failure(400, '전술명은 1~60자, 컨셉과 선수 성향은 각각 1,000자 이내로 작성해 주세요. 선수 성향은 필수입니다.');
+    if (!name || name.length > 60 || concept.length > 1000 || (!traits&&(!Array.isArray(input.ratingFields)||!input.ratingFields.length)) || traits.length > 1000) return failure(400, '전술명은 1~60자, 컨셉과 선수 성향은 각각 1,000자 이내로 작성해 주세요. 선수 성향은 필수입니다.');
+    const allowed=[...basic.map(f=>f.key),...(await db.prepare('SELECT id FROM team_rating_fields WHERE team_id=?').all(team.id)).map(f=>'custom:'+f.id)];
+    const ratingFields=input.ratingFields??[];if(!Array.isArray(ratingFields)||new Set(ratingFields).size!==ratingFields.length||ratingFields.some(key=>!allowed.includes(key)))return failure(400,'현재 팀의 평가 항목을 선택하세요.');
     if (input.tacticId !== undefined) {
       if (!(await db.prepare('SELECT id FROM team_tactics WHERE id=? AND team_id=?').get(input.tacticId, team.id))) return failure(404, '이 팀의 전술이 아닙니다.');
-      (await db.prepare('UPDATE team_tactics SET name=?,concept=?,traits=? WHERE id=?').run(name, concept, traits, input.tacticId));
-    } else (await db.prepare('INSERT INTO team_tactics(team_id,name,concept,traits) VALUES(?,?,?,?)').run(team.id, name, concept, traits));
+      (await db.prepare('UPDATE team_tactics SET name=?,concept=?,traits=?,rating_fields=? WHERE id=?').run(name, concept, traits, JSON.stringify(ratingFields), input.tacticId));
+    } else (await db.prepare('INSERT INTO team_tactics(team_id,name,concept,traits,rating_fields) VALUES(?,?,?,?,?)').run(team.id, name, concept, traits, JSON.stringify(ratingFields)));
     return response(200, (await state(db, user)));
   }
   if (route === '/api/teams/tactics/delete') {
