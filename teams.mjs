@@ -1,4 +1,5 @@
 export function initializeTeams(db) {
+  db.exec('CREATE TABLE IF NOT EXISTS player_quota_defaults(player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,user_id INTEGER NOT NULL REFERENCES users(id),quota REAL NOT NULL CHECK(quota BETWEEN 0 AND 12 AND quota*2=CAST(quota*2 AS INTEGER)),PRIMARY KEY(player_id,user_id));');
   db.exec(`PRAGMA foreign_keys=ON;
     CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id), name TEXT NOT NULL, color TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS players(id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL REFERENCES teams(id), name TEXT NOT NULL);
@@ -42,6 +43,8 @@ export function state(db, user) {
   const tactics = selected ? db.prepare('SELECT id,name,concept,traits FROM team_tactics WHERE team_id=? ORDER BY id').all(selected.id) : [];
   const customFields = selected ? db.prepare('SELECT id,name FROM team_rating_fields WHERE team_id=? ORDER BY id').all(selected.id) : [];
   const customScores = selected ? db.prepare('SELECT r.* FROM player_custom_ratings r JOIN players p ON p.id=r.player_id JOIN team_rating_fields f ON f.id=r.field_id WHERE p.team_id=? AND f.team_id=?').all(selected.id, selected.id) : [];
+  const quotaDefaults=db.prepare('SELECT player_id,quota FROM player_quota_defaults WHERE user_id=?').all(user.id);
+  for(const player of players)player.rememberedQuota=quotaDefaults.find(p=>p.player_id===player.id)?.quota??null;
   for (const player of players) player.customRatings = Object.fromEntries(customFields.map(field => [field.id, customScores.find(score => score.player_id === player.id && score.field_id === field.id)?.score ?? null]));
   for(const player of players)for(const key of ratingKeys)if(!basic.some(f=>f.key===key))player.ratings[key]=null;
   return { teams, selectedTeam: selected, players, incoming, outgoing, tactics, customFields, basicFields:basic };

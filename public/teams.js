@@ -1,3 +1,4 @@
+import {showCommunity} from './community.js';
 import { updateSquadContext, closeSquads, showSquads } from './squads.js';
 const $ = id => document.getElementById(id);
 let api;
@@ -26,9 +27,11 @@ function node(tag, text, className) {
 function page(name) {
   closeProfile();
   currentPage = name;
-  for (const key of ['create', 'manage', 'select', 'tactics', 'transfer', 'squad']) $('page-' + key).hidden = key !== name;
+  for (const key of ['create', 'manage', 'select', 'tactics', 'transfer', 'squad', 'notices', 'free']) $('page-' + key).hidden = key !== name;
   document.querySelectorAll('.sidebar [data-page]').forEach(button => { button.classList.toggle('active', button.dataset.page === name); button.setAttribute('aria-current', button.dataset.page === name ? 'page' : 'false'); });
   const titles = { create: ['팀 생성', '함께 뛸 우리 팀을 만들어 보세요.'], manage: ['선수 관리', '평가 항목을 정하고 선수와 프로필을 관리하세요.'], select: ['팀 선택', '오늘 관리할 팀을 선택하세요.'], tactics: ['팀 전술', '쿼터마다 활용할 우리 팀의 전술 컨셉을 준비하세요.'], transfer: ['팀 이관', '팀을 다른 감독에게 넘기거나 받은 요청을 확인하세요.'] };
+  titles.notices=['공지사항','서비스 소식과 운영 안내를 확인하세요.']; titles.free=['자유게시판','닉네임으로 이야기를 나누세요.'];
+  if(name==='notices'||name==='free')showCommunity(name);
   titles.squad = ['스쿼드', '참석자와 쿼터별 컨셉을 정하고 자동 배치·수정·공유하세요.'];
   $('page-title').textContent = titles[name][0];
   $('page-description').textContent = titles[name][1];

@@ -1,3 +1,4 @@
+import { handleCommunity,nicknameError,nicknameKey,publicUser} from '../community.mjs';
 import {randomBytes,scrypt,timingSafeEqual,createHash} from 'node:crypto';
 import {promisify} from 'node:util';
 import {Database,Conflict} from './database.mjs';
@@ -16,7 +17,7 @@ const headers={
 const json=(status,body,extra={})=>Response.json(body,{status,headers:{...headers,'Cache-Control':'no-store',...extra}});
 async function userFor(db,request){
   const token=tokenFor(request);
-  return token?await db.prepare('SELECT users.id,users.email FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires_at>?').get(digest(token),Date.now()):null;
+  return token?await db.prepare('SELECT users.id,users.email,users.nickname FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires_at>?').get(digest(token),Date.now()):null;
 }
 async function signIn(db,request,user){
   const token=randomBytes(32).toString('hex');
@@ -48,17 +49,19 @@ async function auth(binding,request,path,input){
   if(password.length<8||password.length>128)return json(400,{error:'암호는 8~128자로 입력해 주세요.',field:'password'});
   if(path==='/api/signup'){
     if(password!==input.confirmPassword)return json(400,{error:'암호가 일치하지 않습니다.',field:'confirmPassword'});
+    const nicknameIssue=nicknameError(input.nickname,email);if(nicknameIssue)return json(400,{error:nicknameIssue,field:'nickname'});
+    const nickname=input.nickname.normalize('NFKC').trim();
     const salt=randomBytes(16).toString('hex'),hash=(await derive(password,salt,64)).toString('hex');
     const db=await new Database(binding).start();let user;
-    try{const result=await db.prepare('INSERT INTO users(email,password_hash,salt) VALUES(?,?,?)').run(email,hash,salt);user={id:Number(result.lastInsertRowid),email};}
-    catch(error){if(error.message.includes('UNIQUE'))return json(409,{error:'이미 가입된 이메일입니다. 로그인해 주세요.',field:'email'});throw error;}
-    return json(201,{user},{'Set-Cookie':await signIn(db,request,user)});
+    try{const result=await db.prepare('INSERT INTO users(email,password_hash,salt,nickname,nickname_key) VALUES(?,?,?,?,?)').run(email,hash,salt,nickname,nicknameKey(nickname));user={id:Number(result.lastInsertRowid),email,nickname};}
+    catch(error){if(error.message.includes('UNIQUE'))return json(409,{error:error.message.includes('nickname')?'이미 사용 중인 닉네임입니다.':'이미 가입된 이메일입니다. 로그인해 주세요.',field:error.message.includes('nickname')?'nickname':'email'});throw error;}
+    return json(201,{user:publicUser(user)},{'Set-Cookie':await signIn(db,request,user)});
   }
   const user=await binding.prepare('SELECT * FROM users WHERE email=?').bind(email).first();
   const hash=await derive(password,user?.salt||'invalid-user-timing-salt',64);
   if(!user||!timingSafeEqual(hash,Buffer.from(user.password_hash,'hex')))return json(401,{error:'이메일 또는 암호를 확인해 주세요.'});
   const db=await new Database(binding).start();
-  return json(200,{user:{id:user.id,email:user.email}},{'Set-Cookie':await signIn(db,request,user)});
+  return json(200,{user:publicUser(user)},{'Set-Cookie':await signIn(db,request,user)});
 }
 export default {
   async fetch(request,env){
@@ -84,14 +87,15 @@ export default {
           return json(200,{ok:true},{'Set-Cookie':cookie(request,'',0)});
         }
         let result;
-        if(path.startsWith('/api/teams/'))result=await handleTeams(db,path,user,input);
+        if(path.startsWith('/api/community/'))result=await handleCommunity(db,path,user,input);
+        else if(path.startsWith('/api/teams/'))result=await handleTeams(db,path,user,input);
         else if(path.startsWith('/api/squads/'))result=await handleSquads(db,path,user,input);
         else return json(404,{error:'찾을 수 없는 요청입니다.'});
         await db.verify();return json(result.status,result.body);
       }
       if(request.method==='GET'){
         const db=await new Database(env.DB).start();let result;
-        if(path==='/api/me')result={status:200,body:{user:await userFor(db,request)}};
+        if(path==='/api/me')result={status:200,body:{user:publicUser(await userFor(db,request))}};
         else if(path==='/api/teams/state')result=await handleTeams(db,path,await userFor(db,request),{});
         else if(path.startsWith('/api/shared/'))result=await sharedSquad(db,path.slice('/api/shared/'.length));
         else return json(404,{error:'찾을 수 없는 요청입니다.'});

@@ -1,7 +1,11 @@
+import {openCommunity,closeCommunity} from './community.js';
 import { openManager, closeManager } from './teams.js';
 const $ = id => document.getElementById(id);
 let mode = 'login';
-let busy = false;
+let busy = false,checkedNickname='';
+$('nickname').addEventListener('input',()=>{checkedNickname='';$('nickname-status').textContent='중복 확인이 필요합니다.';});
+$('email').addEventListener('input',()=>{checkedNickname='';});
+$('nickname-check').addEventListener('click',async()=>{const nickname=$('nickname').value.trim(),email=$('email').value.trim();$('nickname-check').disabled=true;try{const data=await api('community/nickname-check',{nickname,email});if(nickname!==$('nickname').value.trim()||email!==$('email').value.trim())return;checkedNickname=data.available?nickname:'';$('nickname-status').textContent=data.available?'사용할 수 있는 닉네임입니다.':'이미 사용 중인 닉네임입니다.';}catch(e){$('nickname-status').textContent=e.error||'중복 확인을 하지 못했습니다.';}finally{$('nickname-check').disabled=false;}});
 function message(text, field) {
   $('form-message').textContent = text;
   $('form-message').hidden = !text;
@@ -16,6 +20,7 @@ function switchMode(next) {
   document.querySelectorAll('.reveal').forEach(button => { $(button.dataset.target).type = 'password'; button.textContent = '보기'; button.setAttribute('aria-pressed', 'false'); });
   const signup = mode === 'signup';
   $('confirm-field').hidden = !signup;
+  $('nickname-field').hidden=!signup;$('nickname').required=signup;checkedNickname='';$('nickname-status').textContent='한글·영문·숫자·밑줄로 2~20자 입력하세요.';
   $('confirmPassword').required = signup;
   $('password').autocomplete = signup ? 'new-password' : 'current-password';
   $('form-title').textContent = signup ? '우리 팀을 위한 첫걸음' : '다시 만나 반가워요';
@@ -27,7 +32,8 @@ function switchMode(next) {
 function dashboard(user, isNew = false) {
   $('auth-view').hidden = true;
   $('dashboard-view').hidden = false;
-  $('account-email').textContent = user.email;
+  $('account-email').textContent = `${user.nickname} · ${user.email}`;
+  openCommunity(api,user);
   $('account-form').reset();
   openManager(api, isNew);
 }
@@ -52,8 +58,9 @@ $('account-form').addEventListener('submit', async event => {
   event.preventDefault();
   if (busy) return;
   message('');
-  const input = { email: $('email').value.trim(), password: $('password').value, confirmPassword: $('confirmPassword').value };
+  const input = { email: $('email').value.trim(), password: $('password').value, confirmPassword: $('confirmPassword').value, nickname: $('nickname').value.trim() };
   if (mode === 'signup' && input.password !== input.confirmPassword) return message('암호가 일치하지 않습니다. 다시 확인해 주세요.', 'confirmPassword');
+  if(mode==='signup'&&checkedNickname!==input.nickname)return message('닉네임 중복 확인을 완료해 주세요.','nickname');
   busy = true;
   const button = $('submit-button');
   button.disabled = true;
@@ -67,7 +74,7 @@ $('logout-button').addEventListener('click', async () => {
   $('dashboard-message').hidden = true;
   try {
     await api('logout', {});
-    closeManager();
+    closeManager();closeCommunity();
     $('dashboard-view').hidden = true;
     $('auth-view').hidden = false;
     $('account-email').textContent = '';

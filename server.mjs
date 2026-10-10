@@ -1,3 +1,4 @@
+import {initializeCommunity, handleCommunity,nicknameError,nicknameKey,publicUser} from './community.mjs';
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, scrypt, timingSafeEqual, createHash } from 'node:crypto';
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, email TEXT NOT NULL UN
 CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);`);
 initializeTeams(db);
 initializeSquads(db);
+initializeCommunity(db);
 const derive = promisify(scrypt);
 const digest = token => createHash('sha256').update(token).digest('hex');
 const attempts = new Map();
@@ -30,7 +32,7 @@ function json(res, status, body) {
 function userFor(req) {
   const token = /(?:^|;\s*)session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || '')?.[1];
   if (!token) return null;
-  return db.prepare('SELECT users.id, users.email FROM sessions JOIN users ON users.id = sessions.user_id WHERE token_hash = ? AND expires_at > ?').get(digest(token), Date.now()) || null;
+  return db.prepare('SELECT users.id, users.email, users.nickname FROM sessions JOIN users ON users.id = sessions.user_id WHERE token_hash = ? AND expires_at > ?').get(digest(token), Date.now()) || null;
 }
 function signIn(res, user) {
   const token = randomBytes(32).toString('hex');
@@ -54,7 +56,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname.startsWith('/api/shared/')) {const result=sharedSquad(db,url.pathname.slice('/api/shared/'.length));return json(res,result.status,result.body);}
     if (req.method === 'GET' && url.pathname.startsWith('/share/')) {res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});return res.end(readFileSync(path.join(root,'public','shared.html')));}
-    if (url.pathname === '/api/me' && req.method === 'GET') return json(res, 200, { user: userFor(req) });
+    if (url.pathname === '/api/me' && req.method === 'GET') return json(res, 200, { user: publicUser(userFor(req)) });
     if (url.pathname === '/api/teams/state' && req.method === 'GET') {
       const result = handleTeams(db, url.pathname, userFor(req), {});
       return json(res, result.status, result.body);
@@ -63,6 +65,7 @@ const server = http.createServer(async (req, res) => {
       const expected = process.env.PUBLIC_ORIGIN || `http://${req.headers.host}`;
       if (req.headers.origin !== expected) return json(res, 403, { error: '허용되지 않은 요청입니다.' });
       if (!req.headers['content-type']?.startsWith('application/json')) return json(res, 415, { error: 'JSON 형식이 필요합니다.' });
+      if(url.pathname.startsWith('/api/community/')){const result=await handleCommunity(db,url.pathname,userFor(req),await body(req));return json(res,result.status,result.body);}
       if (url.pathname.startsWith('/api/squads/')) {const result=handleSquads(db,url.pathname,userFor(req),await body(req));return json(res,result.status,result.body);}
       if (url.pathname.startsWith('/api/teams/')) {
         const result = handleTeams(db, url.pathname, userFor(req), await body(req));
@@ -89,25 +92,27 @@ const server = http.createServer(async (req, res) => {
       if (password.length < 8 || password.length > 128) return json(res, 400, { error: '암호는 8~128자로 입력해 주세요.', field: 'password' });
       if (url.pathname === '/api/signup') {
         if (password !== input.confirmPassword) return json(res, 400, { error: '암호가 일치하지 않습니다.', field: 'confirmPassword' });
+        const nicknameIssue=nicknameError(input.nickname,email);if(nicknameIssue)return json(res,400,{error:nicknameIssue,field:'nickname'});
+        const nickname=input.nickname.normalize('NFKC').trim();
         const salt = randomBytes(16).toString('hex');
         const hash = (await derive(password, salt, 64)).toString('hex');
         let result;
-        try { result = db.prepare('INSERT INTO users (email, password_hash, salt) VALUES (?, ?, ?)').run(email, hash, salt); }
+        try { result = db.prepare('INSERT INTO users (email, password_hash, salt, nickname, nickname_key) VALUES (?, ?, ?, ?, ?)').run(email, hash, salt,nickname,nicknameKey(nickname)); }
         catch (error) {
-          if (error.code === 'ERR_SQLITE_ERROR' && error.message.includes('UNIQUE')) return json(res, 409, { error: '이미 가입된 이메일입니다. 로그인해 주세요.', field: 'email' });
+          if (error.code === 'ERR_SQLITE_ERROR' && error.message.includes('UNIQUE')) return json(res, 409, { error: error.message.includes('nickname')?'이미 사용 중인 닉네임입니다.':'이미 가입된 이메일입니다. 로그인해 주세요.', field: error.message.includes('nickname')?'nickname':'email' });
           throw error;
         }
-        const user = { id: Number(result.lastInsertRowid), email };
+        const user = { id: Number(result.lastInsertRowid), email,nickname };
         signIn(res, user);
-        return json(res, 201, { user });
+        return json(res, 201, { user:publicUser(user) });
       }
       const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
       const hash = await derive(password, user?.salt || 'invalid-user-timing-salt', 64);
       if (!user || !timingSafeEqual(hash, Buffer.from(user.password_hash, 'hex'))) return json(res, 401, { error: '이메일 또는 암호를 확인해 주세요.' });
       signIn(res, user);
-      return json(res, 200, { user: { id: user.id, email: user.email } });
+      return json(res, 200, { user: publicUser(user) });
     }
-    const files = { '/squad-history.js': ['squad-history.js','text/javascript'], '/squads.js': ['squads.js', 'text/javascript'], '/squad-engine.js': ['squad-engine.js','text/javascript'], '/squad-view.js': ['squad-view.js','text/javascript'], '/shared.js': ['shared.js','text/javascript'], '/squads.css': ['squads.css','text/css'], '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/teams.js': ['teams.js', 'text/javascript'], '/teams.css': ['teams.css', 'text/css'], '/profiles.css': ['profiles.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
+    const files = { '/community.js':['community.js','text/javascript'], '/quota-defaults.js':['quota-defaults.js','text/javascript'], '/squad-history.js': ['squad-history.js','text/javascript'], '/squads.js': ['squads.js', 'text/javascript'], '/squad-engine.js': ['squad-engine.js','text/javascript'], '/squad-view.js': ['squad-view.js','text/javascript'], '/shared.js': ['shared.js','text/javascript'], '/squads.css': ['squads.css','text/css'], '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/teams.js': ['teams.js', 'text/javascript'], '/teams.css': ['teams.css', 'text/css'], '/profiles.css': ['profiles.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
     if (req.method === 'GET' && files[url.pathname]) {
       const [file, type] = files[url.pathname];
       res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-cache' });

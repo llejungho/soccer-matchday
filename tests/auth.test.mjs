@@ -22,13 +22,14 @@ test('account lifecycle, persistence, validation, and session protection', async
   async function post(route, input, cookie, requestOrigin = origin) {
     return fetch(origin + '/api/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: requestOrigin, ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(input) });
   }
-  const credentials = { email: 'Coach@Example.com', password: 'test-pass-42', confirmPassword: 'test-pass-42' };
+  const credentials = { nickname: '감독QA', email: 'Coach@Example.com', password: 'test-pass-42', confirmPassword: 'test-pass-42' };
   try {
     await launch();
     assert.equal((await fetch(origin)).status, 200);
     assert.equal((await post('signup', { ...credentials, email: 'invalid' })).status, 400);
     assert.equal((await post('signup', { ...credentials, password: 'short', confirmPassword: 'short' })).status, 400);
     assert.equal((await post('signup', { ...credentials, confirmPassword: 'wrong-pass' })).status, 400);
+    assert.equal((await post('signup', { ...credentials, nickname: '' })).status, 400);
     assert.equal((await post('signup', credentials, null, 'http://untrusted.example')).status, 403);
     const signup = await post('signup', credentials);
     assert.equal(signup.status, 201);
@@ -39,6 +40,8 @@ test('account lifecycle, persistence, validation, and session protection', async
     const me = await fetch(origin + '/api/me', { headers: { Cookie: cookie } });
     assert.equal((await me.json()).user.email, 'coach@example.com');
     assert.equal((await post('signup', credentials)).status, 409);
+    const duplicateNickname=await post('signup',{...credentials,email:'duplicate-nickname@example.com'});
+    assert.equal(duplicateNickname.status,409);assert.equal((await duplicateNickname.json()).field,'nickname');
     assert.equal((await post('login', { ...credentials, password: 'incorrect-pass' })).status, 401);
     const db = new DatabaseSync(path.join(directory, 'accounts.sqlite'));
     const saved = db.prepare('SELECT * FROM users').get();
@@ -52,9 +55,9 @@ test('account lifecycle, persistence, validation, and session protection', async
     const login = await post('login', credentials);
     assert.equal(login.status, 200);
     const ownerCookie = login.headers.get('set-cookie').split(';')[0];
-    const receiverSignup = await post('signup', { email: 'receiver@example.com', password: credentials.password, confirmPassword: credentials.password });
+    const receiverSignup = await post('signup', { nickname: '받는감독', email: 'receiver@example.com', password: credentials.password, confirmPassword: credentials.password });
     const receiverCookie = receiverSignup.headers.get('set-cookie').split(';')[0];
-    const otherSignup = await post('signup', { email: 'other@example.com', password: credentials.password, confirmPassword: credentials.password });
+    const otherSignup = await post('signup', { nickname: '다른감독', email: 'other@example.com', password: credentials.password, confirmPassword: credentials.password });
     const otherCookie = otherSignup.headers.get('set-cookie').split(';')[0];
     const getState = async cookie => (await (await fetch(origin + '/api/teams/state', { headers: { Cookie: cookie } })).json());
     assert.equal((await post('teams/create', { name: 'FC A', color: '#245e45' })).status, 401);

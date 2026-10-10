@@ -20,7 +20,7 @@ const cleanup=[
   `DELETE FROM team_preferences WHERE user_id IN ${user};`,`DELETE FROM teams WHERE id IN ${team};`,`DELETE FROM sessions WHERE user_id IN ${user};`,`DELETE FROM users WHERE id IN ${user};`,
 ];
 mkdirSync('data/exports',{recursive:true});writeFileSync('data/exports/cloudflare-qa-cleanup.sql',cleanup.join('\n'));
-await call('/api/signup',{email,password,confirmPassword:password});
+await call('/api/signup',{nickname:'QA'+key,email,password,confirmPassword:password});
 await call('/api/logout',{});await call('/api/login',{email,password});
 const created=await call('/api/teams/create',{name:teamName,color:'#123456'}),teamId=created.selectedTeam.id;
 assert.equal(created.basicFields.length,5);

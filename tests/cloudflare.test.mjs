@@ -17,6 +17,7 @@ test('Cloudflare API preserves legacy login and supports profiles, squads, resul
   const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('migrations/0001_initial.sql','utf8'));
   const binding=bindingFor(sqlite),env={DB:binding,ASSETS:{fetch:async()=>new Response('<html>test</html>',{headers:{'Content-Type':'text/html'}})}};
   const salt='legacy-salt';sqlite.prepare('INSERT INTO users VALUES(1,?,?,?,CURRENT_TIMESTAMP)').run('legacy@example.com',scryptSync('legacy-pass',salt,64).toString('hex'),salt);
+  sqlite.exec(readFileSync('migrations/0002_community.sql','utf8'));
   let cookies={};
   async function call(path,input,who='a'){
     const request=new Request('https://test.pages.dev'+path,{method:input===undefined?'GET':'POST',headers:{origin:'https://test.pages.dev','content-type':'application/json',cookie:cookies[who]||''},...(input===undefined?{}:{body:JSON.stringify(input)})});
@@ -25,8 +26,8 @@ test('Cloudflare API preserves legacy login and supports profiles, squads, resul
   }
   try{
     assert.equal((await call('/api/login',{email:'legacy@example.com',password:'legacy-pass'})).status,200);
-    assert.equal((await call('/api/signup',{email:'b@example.com',password:'test-pass',confirmPassword:'test-pass'},'b')).status,201);
-    assert.equal((await call('/api/signup',{email:'b@example.com',password:'test-pass',confirmPassword:'test-pass'},'c')).status,409);
+    assert.equal((await call('/api/signup',{nickname:'감독B',email:'b@example.com',password:'test-pass',confirmPassword:'test-pass'},'b')).status,201);
+    assert.equal((await call('/api/signup',{nickname:'감독B',email:'b@example.com',password:'test-pass',confirmPassword:'test-pass'},'c')).status,409);
     assert.equal((await worker.fetch(new Request('https://test.pages.dev/api/login',{method:'POST',headers:{origin:'https://evil.test','content-type':'application/json'},body:'{}'}),env)).status,403);
     const created=await call('/api/teams/create',{name:'Test team',color:'#123456'});assert.equal(created.status,201);
     const teamId=created.body.selectedTeam.id;
@@ -72,5 +73,43 @@ test('D1 atomic batches roll back and reject stale concurrent ownership changes'
     const c=await new Database(binding).start();
     await assert.rejects(()=>c.transaction(async()=>{await c.prepare('INSERT INTO teams(owner_id,name,color) VALUES(1,?,?)').run('Rollback','#123456');await c.prepare('INSERT INTO players(team_id,name) VALUES(999,?)').run('Invalid');}));
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM teams').get().n,0);
+  }finally{sqlite.close();}
+});
+
+test('Cloudflare nickname uniqueness, boards, comments and remembered quotas enforce server permissions',async()=>{
+  const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('migrations/0001_initial.sql','utf8'));sqlite.exec(readFileSync('migrations/0002_community.sql','utf8'));
+  const env={DB:bindingFor(sqlite)},cookies={};
+  async function call(route,input,who='a'){
+    const response=await worker.fetch(new Request('https://test.pages.dev/api/'+route,{method:input===undefined?'GET':'POST',headers:{origin:'https://test.pages.dev','content-type':'application/json',cookie:cookies[who]||''},...(input===undefined?{}:{body:JSON.stringify(input)})}),env);
+    if(response.headers.get('set-cookie'))cookies[who]=response.headers.get('set-cookie').split(';')[0];return {status:response.status,body:await response.json()};
+  }
+  const signup=(email,nickname)=>({email,nickname,password:'test-pass',confirmPassword:'test-pass'});
+  try{
+    assert.equal((await call('signup',signup('a@test.com',''))).status,400);
+    assert.equal((await call('signup',signup('a@test.com','관리자'))).status,400);
+    assert.equal((await call('signup',signup('a@test.com','Coach_A'))).status,201);
+    assert.equal((await call('signup',signup('b@test.com','ＣOACH_A'),'b')).status,409);
+    assert.equal((await call('signup',signup('b@test.com','감독B'),'b')).status,201);
+    assert.equal((await call('signup',signup('llee86@naver.com','관리자'),'admin')).status,201);
+    assert.equal((await call('me',undefined,'admin')).body.user.isAdmin,true);
+    assert.equal((await call('community/nickname-check',{nickname:'coach_a',email:'c@test.com'},'anon')).body.available,false);
+    assert.equal((await call('community/post-save',{board:'notices',title:'공지',content:'내용'})).status,403);
+    const notice=await call('community/post-save',{board:'notices',title:'공지',content:'운영 안내'},'admin');assert.equal(notice.status,201);
+    const post=await call('community/post-save',{board:'free',title:'글',content:'내용'});assert.equal(post.status,201);const postId=post.body.postId;
+    assert.equal((await call('community/post-save',{postId,title:'다른 회원 수정',content:'내용'},'b')).status,403);
+    assert.equal((await call('community/post-delete',{postId},'b')).status,403);
+    assert.equal((await call('community/post-save',{postId,title:'관리자 수정',content:'내용'},'admin')).status,200);
+    assert.equal((await call('community/comment-save',{postId,content:'댓글'},'b')).status,201);
+    const detail=(await call('community/post',{postId})).body;assert.equal(detail.post.nickname,'Coach_A');assert.equal(detail.comments[0].nickname,'감독B');
+    const commentId=detail.comments[0].id;assert.equal((await call('community/comment-save',{commentId,content:'변조'})).status,403);
+    assert.equal((await call('community/comment-delete',{commentId})).status,403);
+    assert.equal((await call('community/comment-save',{commentId,content:'관리자 수정'},'admin')).status,200);
+    assert.equal((await call('community/comment-delete',{commentId},'admin')).status,200);
+    const team=(await call('teams/create',{name:'기억값 테스트',color:'#123456'})).body.selectedTeam;
+    const player=(await call('teams/players/add',{teamId:team.id,name:'선수'})).body.players[0];
+    assert.equal((await call('community/quota-default',{playerId:player.id,quota:3},'b')).status,404);
+    assert.equal((await call('community/quota-default',{playerId:player.id,quota:3})).status,200);
+    assert.equal((await call('teams/state')).body.players[0].rememberedQuota,3);
+    assert.equal((await call('community/post-delete',{postId},'admin')).status,200);
   }finally{sqlite.close();}
 });

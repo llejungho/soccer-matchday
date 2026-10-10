@@ -26,6 +26,8 @@ export async function state(db, user, selectedId) {
   const tactics = selected ? (await db.prepare('SELECT id,name,concept,traits FROM team_tactics WHERE team_id=? ORDER BY id').all(selected.id)) : [];
   const customFields = selected ? (await db.prepare('SELECT id,name FROM team_rating_fields WHERE team_id=? ORDER BY id').all(selected.id)) : [];
   const customScores = selected ? (await db.prepare('SELECT r.* FROM player_custom_ratings r JOIN players p ON p.id=r.player_id JOIN team_rating_fields f ON f.id=r.field_id WHERE p.team_id=? AND f.team_id=?').all(selected.id, selected.id)) : [];
+  const quotaDefaults=await db.prepare('SELECT player_id,quota FROM player_quota_defaults WHERE user_id=?').all(user.id);
+  for(const player of players)player.rememberedQuota=quotaDefaults.find(p=>p.player_id===player.id)?.quota??null;
   for (const player of players) player.customRatings = Object.fromEntries(customFields.map(field => [field.id, customScores.find(score => score.player_id === player.id && score.field_id === field.id)?.score ?? null]));
   for(const player of players)for(const key of ratingKeys)if(!basic.some(f=>f.key===key))player.ratings[key]=null;
   return { teams, selectedTeam: selected, players, incoming, outgoing, tactics, customFields, basicFields:basic };
