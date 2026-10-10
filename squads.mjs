@@ -102,7 +102,7 @@ export function handleSquads(db,route,user,input) {
     else {
       const q=result.quarters[qi],people=new Map(config.players.map(p=>[p.key,p]));
       const lineups=q.halves.map(half=>half.flatMap((key,i)=>key?[{id:people.get(key).id??null,name:people.get(key).name,position:slotsFor(q.formation)[i].pos,weight:0.5}]:[]));
-      const snapshot={formation:q.formation,tacticId:config.quarters[qi].tacticId,tacticName:q.tacticName,tacticConcept:config.quarters[qi].tactic?.concept||'',tacticTraits:config.quarters[qi].tactic?.traits||'',lineups,players:lineups.flat()};
+      const snapshot={formation:q.formation,tacticId:config.quarters[qi].tacticId,tacticName:q.tacticName,tacticConcept:config.quarters[qi].tactic?.concept||'',tacticTraits:config.quarters[qi].tactic?.traits||'',tacticRatingFields:config.quarters[qi].tactic?.ratingFields||[],lineups,players:lineups.flat()};
       db.prepare('INSERT INTO squad_outcomes VALUES(?,?,?,?) ON CONFLICT(squad_id,quarter) DO UPDATE SET outcome=excluded.outcome,snapshot=excluded.snapshot').run(existing.id,qi,input.outcome,JSON.stringify(snapshot));
     }
     return answer(200,{outcomes:db.prepare('SELECT quarter,outcome FROM squad_outcomes WHERE squad_id=? ORDER BY quarter').all(existing.id)});

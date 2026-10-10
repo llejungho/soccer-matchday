@@ -1,7 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {generate,slotsFor,totals} from '../public/squad-engine.js';
-import {buildHistory,historyAnalysis,historyScore} from '../public/squad-history.js';
+import {buildHistory,historyAnalysis,historyScore,contextKey} from '../public/squad-history.js';
+test('historical tactic context includes selected criteria and survives selection ordering',()=>{
+  const q={id:1,name:'압박',ratingFields:['stamina','aggression']};
+  assert.equal(contextKey('442',q),contextKey('442',{tacticId:1,tacticName:'압박',tacticRatingFields:['aggression','stamina']}));
+  assert.notEqual(contextKey('442',q),contextKey('442',{...q,ratingFields:['defense']}));
+});
 const player=(id,pos,quota)=>({id,key:'p:'+id,name:'선수'+id,positions:[pos],keeper:pos==='GK',quota,ratings:{},customRatings:{},chemistry:{good:[],bad:[]}});
 test('first two quarters stay full while 2.5 quotas are fulfilled in later quarters',()=>{
   const players=Array.from({length:16},(_,i)=>player(i+1,'CM',2.5));players.push(player(17,'GK',4));

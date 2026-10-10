@@ -1,4 +1,4 @@
-const signature=t=>JSON.stringify([t?.id??t?.tacticId??null,t?.name??t?.tacticName??'기본 컨셉',t?.concept??t?.tacticConcept??'',t?.traits??t?.tacticTraits??'']);
+const signature=t=>JSON.stringify([t?.id??t?.tacticId??null,t?.name??t?.tacticName??'기본 컨셉',t?.concept??t?.tacticConcept??'',t?.traits??t?.tacticTraits??'',[...(t?.ratingFields??t?.tacticRatingFields??[])].sort()]);
 export const contextKey=(formation,tactic)=>JSON.stringify([formation,signature(tactic)]);
 const add=(map,key,label,outcome,weight=1)=>{let v=map.get(key);if(!v){v={label,win:0,draw:0,loss:0,total:0};map.set(key,v);}v[outcome]+=weight;v.total+=weight;};
 const values=map=>[...map.values()].map(v=>({...v,winRate:Math.round(v.win/v.total*1000)/10})).sort((a,b)=>b.total-a.total||b.winRate-a.winRate);
