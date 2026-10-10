@@ -61,7 +61,8 @@ async function auth(binding,request,path,input){
   }
   const user=await binding.prepare('SELECT * FROM users WHERE email=?').bind(email).first();
   const hash=await derive(password,user?.salt||'invalid-user-timing-salt',64);
-  if(!user||!timingSafeEqual(hash,Buffer.from(user.password_hash,'hex')))return json(401,{error:'이메일 또는 암호를 확인해 주세요.'});
+  const stored=Buffer.from(user?.password_hash||'','hex');
+  if(!user||stored.length!==hash.length||!timingSafeEqual(hash,stored))return json(401,{error:'이메일 또는 암호를 확인해 주세요.'});
   const db=await new Database(binding).start();
   return json(200,{user:publicUser(user)},{'Set-Cookie':await signIn(db,request,user)});
 }

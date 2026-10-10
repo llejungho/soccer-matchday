@@ -117,7 +117,8 @@ const server = http.createServer(async (req, res) => {
       }
       const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
       const hash = await derive(password, user?.salt || 'invalid-user-timing-salt', 64);
-      if (!user || !timingSafeEqual(hash, Buffer.from(user.password_hash, 'hex'))) return json(res, 401, { error: '이메일 또는 암호를 확인해 주세요.' });
+      const stored=Buffer.from(user?.password_hash||'','hex');
+      if (!user || stored.length!==hash.length || !timingSafeEqual(hash, stored)) return json(res, 401, { error: '이메일 또는 암호를 확인해 주세요.' });
       signIn(res, user);
       return json(res, 200, { user: publicUser(user) });
     }

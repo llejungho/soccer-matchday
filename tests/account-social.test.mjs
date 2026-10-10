@@ -48,5 +48,6 @@ test('Worker password renewal and SNS signup return session cookies without inte
     const changed=await call('account/password',{currentPassword:'old-password',newPassword:'new-password',confirmPassword:'new-password'},old);assert.equal(changed.status,200);const next=changed.headers.get('set-cookie').split(';')[0];assert.notEqual(next,old);assert.equal((await changed.json()).renewSession,undefined);assert.equal((await (await call('me',undefined,old)).json()).user,null);assert.ok((await (await call('me',undefined,next)).json()).user);
     const token='d'.repeat(64);sqlite.prepare('INSERT INTO oauth_pending VALUES(?,?,?,?,?)').run(digest(token),'google','new-subject','new@test.com',Date.now()+60000);
     const finish=await call('social/finish',{action:'signup',nickname:'새감독'},'oauth_pending='+token);assert.equal(finish.status,200);assert.equal(finish.headers.getSetCookie().length,2);const body=await finish.json();assert.equal(body.user.nickname,'새감독');assert.equal(body.signInUser,undefined);assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM social_identities').get().n,1);
+    assert.equal((await call('login',{email:'new@test.com',password:'any-password'})).status,401);
   }finally{sqlite.close();}
 });
