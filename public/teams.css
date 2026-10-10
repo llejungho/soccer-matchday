@@ -3,3 +3,5 @@
 .setup-guide{padding:18px;background:#eaf0e1;border-radius:10px;margin-bottom:22px}.setup-guide p{font-size:15px;line-height:1.8;margin-bottom:12px}#page-manage .management-grid{grid-template-columns:1fr}.custom-field-row .config-actions{flex-shrink:0}
 
 .player-subnav{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:24px}.player-subnav button{padding:12px 20px;border:1px solid #bdcdb3;border-radius:8px;background:white;color:#254f38;font:inherit}.player-subnav button[aria-current=page]{background:#254f38;color:white}@media(max-width:720px){.player-subnav button{flex:1 1 auto}}
+
+@media(min-width:721px){.sidebar{overflow-y:auto;min-height:0}.sidebar>*,.sidebar-bottom{flex-shrink:0}.sidebar-bottom{margin-top:24px}}

@@ -26,7 +26,7 @@
       <div class="auth-bottom"><p class="switch-copy" id="switch-copy">아직 계정이 없으신가요? <button type="button" id="switch-mode">회원가입</button></p><button id="forgot-password" class="text-link" type="button">비밀번호 찾기</button></div>
       <div class="next-note"><span class="note-icon" aria-hidden="true">✓</span><p>시작은 간단하게.<br><span>이메일·암호·닉네임으로 시작하세요.</span></p></div>
     </div>
-    <footer class="panel-footer"><span>© 2026 MATCHDAY</span><span>함께 뛰는 팀을 위해.</span></footer>
+    <footer class="panel-footer"><span>© 2026 MATCHDAY</span><a href="/about.html">MATCHDAY 서비스 소개</a></footer>
   </section>
 </main>
 <main id="dashboard-view" class="manager" hidden>
@@ -69,4 +69,4 @@
   </form>
 </dialog>
 <dialog id="quota-alert" aria-labelledby="quota-alert-title" aria-describedby="quota-alert-text"><h2 id="quota-alert-title">출전량 조정 안내</h2><p id="quota-alert-text"></p><form method="dialog"><button class="primary">확인</button></form></dialog>
-<dialog id="social-dialog"><form id="social-finish-form"><h2 id="social-dialog-title"></h2><p id="social-dialog-description"></p><div class="field" id="social-link-password-field"><label for="social-link-password">기존 이메일 계정 암호</label><input id="social-link-password" type="password" autocomplete="current-password" maxlength="128"></div><div class="field" id="social-nickname-field"><label for="social-nickname">닉네임</label><input id="social-nickname" minlength="2" maxlength="20" autocomplete="nickname"></div><p id="social-dialog-error" role="alert"></p><button id="social-confirm" class="primary" type="submit"></button><button id="social-cancel" class="secondary" type="button">취소</button></form></dialog></body></html>
+<dialog id="social-dialog"><form id="social-finish-form"><h2 id="social-dialog-title"></h2><p id="social-dialog-description"></p><div class="field" id="social-link-password-field"><label for="social-link-password">기존 이메일 계정 암호</label><input id="social-link-password" type="password" autocomplete="current-password" maxlength="128"></div><div class="field" id="social-nickname-field"><label for="social-nickname">닉네임</label><div class="inline-form"><input id="social-nickname" minlength="2" maxlength="20" autocomplete="nickname"><button id="social-nickname-check" class="secondary" type="button">중복 확인</button></div><p id="social-nickname-status" class="hint" role="status">게시판에 표시할 이름입니다. 2~20자로 입력하세요.</p></div><p id="social-dialog-error" role="alert"></p><button id="social-confirm" class="primary" type="submit"></button><button id="social-cancel" class="secondary" type="button">취소</button></form></dialog></body></html>

@@ -25,6 +25,7 @@ export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
     const id=start[1],p=providers[id],config=settings(env,id);if(!config.id||!config.secret)return answer(503,{error:'해당 SNS 로그인은 아직 준비 중입니다. 이메일로 이용해 주세요.'});
     const state=random(),verifier=random();await db.transaction(async()=>{await db.prepare('DELETE FROM oauth_states WHERE expires_at<=?').run(Date.now());await db.prepare('INSERT INTO oauth_states VALUES(?,?,?,?)').run(hash(state),id,verifier,Date.now()+600000);});
     const destination=new URL(p.authorize);for(const [key,value] of Object.entries({response_type:'code',client_id:config.id,redirect_uri:url.origin+'/api/social/callback/'+id,state,...(p.scope?{scope:p.scope}:{})}))destination.searchParams.set(key,value);
+    if(id==='naver'&&url.searchParams.get('consent')==='1')destination.searchParams.set('auth_type','reprompt');
     if(p.pkce){destination.searchParams.set('code_challenge',createHash('sha256').update(verifier).digest('base64url'));destination.searchParams.set('code_challenge_method','S256');}
     return answer(302,null,{Location:destination.href,'Set-Cookie':setCookie(request,'oauth_state',state,600)});
   }
@@ -44,6 +45,7 @@ export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
     if(db.start)await db.start();
     const subject=id==='naver'?profile.response?.id:id==='kakao'?profile.id:profile.sub;
     const email=(id==='naver'?profile.response?.email:id==='kakao'?profile.kakao_account?.email:profile.email)?.trim().toLowerCase();
+    if(id==='naver'&&subject&&!email)return answer(302,null,{Location:'/?social=email-required&provider=naver','Set-Cookie':setCookie(request,'oauth_state','',0)});
     if(!subject||!email||email.length>254||!/^\S+@\S+\.\S+$/.test(email)||(id==='google'&&!profile.email_verified)||(id==='kakao'&&(!profile.kakao_account.is_email_valid||!profile.kakao_account.is_email_verified)))return answer(400,{error:'SNS 계정의 이메일 제공 동의와 이메일 인증 상태를 확인해 주세요.'});
     const pending=random();await db.transaction(async()=>{await db.prepare('DELETE FROM oauth_pending WHERE expires_at<=?').run(Date.now());await db.prepare('INSERT INTO oauth_pending VALUES(?,?,?,?,?)').run(hash(pending),id,String(subject),email,Date.now()+600000);});
     return answer(302,null,{Location:'/?social=complete','Set-Cookie':setCookie(request,'oauth_pending',pending,600)});

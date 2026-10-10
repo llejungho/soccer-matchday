@@ -11,6 +11,9 @@ backups/
 *.sqlite-shm
 *.png
 !public/guide/*.png
+!public/assets/naver-login.png
 *.log
 dist/
 .wrangler/
+output/
+tmp/
