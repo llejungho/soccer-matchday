@@ -1,0 +1,11 @@
+data/
+node_modules/
+.env
+.env.*
+!.env.example
+backups/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.png
+*.log
