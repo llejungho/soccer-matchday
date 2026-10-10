@@ -11,7 +11,7 @@ const providers={
 export const socialSchema=`CREATE TABLE IF NOT EXISTS social_identities(provider TEXT NOT NULL,subject TEXT NOT NULL,user_id INTEGER NOT NULL REFERENCES users(id),PRIMARY KEY(provider,subject),UNIQUE(user_id,provider));
 CREATE TABLE IF NOT EXISTS oauth_states(state_hash TEXT PRIMARY KEY,provider TEXT NOT NULL,verifier TEXT NOT NULL,expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS oauth_pending(token_hash TEXT PRIMARY KEY,provider TEXT NOT NULL,subject TEXT NOT NULL,email TEXT NOT NULL,expires_at INTEGER NOT NULL);`;
-const settings=(env,p)=>({id:env[p.toUpperCase()+'_CLIENT_ID'],secret:env[p.toUpperCase()+'_CLIENT_SECRET']});
+const settings=(env,p)=>({id:env[p.toUpperCase()+'_CLIENT_ID']?.trim(),secret:env[p.toUpperCase()+'_CLIENT_SECRET']?.trim()});
 export const providerStatus=env=>Object.entries(providers).map(([id,p])=>({id,name:p.name,enabled:!!(settings(env,id).id&&settings(env,id).secret)}));
 const cookieValue=(request,name)=>new RegExp('(?:^|;\\s*)'+name+'=([a-f0-9]{64})(?:;|$)').exec(request.headers.get('cookie')||'')?.[1];
 const setCookie=(request,name,value,maxAge)=>`${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${new URL(request.url).protocol==='https:'?'; Secure':''}`;
