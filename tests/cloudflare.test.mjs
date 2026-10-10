@@ -17,7 +17,7 @@ test('Cloudflare API preserves legacy login and supports profiles, squads, resul
   const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('migrations/0001_initial.sql','utf8'));
   const binding=bindingFor(sqlite),env={DB:binding,ASSETS:{fetch:async()=>new Response('<html>test</html>',{headers:{'Content-Type':'text/html'}})}};
   const salt='legacy-salt';sqlite.prepare('INSERT INTO users VALUES(1,?,?,?,CURRENT_TIMESTAMP)').run('legacy@example.com',scryptSync('legacy-pass',salt,64).toString('hex'),salt);
-  sqlite.exec(readFileSync('migrations/0002_community.sql','utf8'));sqlite.exec(readFileSync('migrations/0003_accounts_boards_tactics.sql','utf8'));
+  sqlite.exec(readFileSync('migrations/0002_community.sql','utf8'));sqlite.exec(readFileSync('migrations/0003_accounts_boards_tactics.sql','utf8'));sqlite.exec(readFileSync('migrations/0005_account_status.sql','utf8'));
   let cookies={};
   async function call(path,input,who='a'){
     const request=new Request('https://test.pages.dev'+path,{method:input===undefined?'GET':'POST',headers:{origin:'https://test.pages.dev','content-type':'application/json',cookie:cookies[who]||''},...(input===undefined?{}:{body:JSON.stringify(input)})});
@@ -77,7 +77,7 @@ test('D1 atomic batches roll back and reject stale concurrent ownership changes'
 });
 
 test('Cloudflare nickname uniqueness, boards, comments and remembered quotas enforce server permissions',async()=>{
-  const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('migrations/0001_initial.sql','utf8'));sqlite.exec(readFileSync('migrations/0002_community.sql','utf8'));sqlite.exec(readFileSync('migrations/0003_accounts_boards_tactics.sql','utf8'));
+  const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('migrations/0001_initial.sql','utf8'));sqlite.exec(readFileSync('migrations/0002_community.sql','utf8'));sqlite.exec(readFileSync('migrations/0003_accounts_boards_tactics.sql','utf8'));sqlite.exec(readFileSync('migrations/0005_account_status.sql','utf8'));
   const env={DB:bindingFor(sqlite)},cookies={};
   async function call(route,input,who='a'){
     const response=await worker.fetch(new Request('https://test.pages.dev/api/'+route,{method:input===undefined?'GET':'POST',headers:{origin:'https://test.pages.dev','content-type':'application/json',cookie:cookies[who]||''},...(input===undefined?{}:{body:JSON.stringify(input)})}),env);
@@ -94,7 +94,7 @@ test('Cloudflare nickname uniqueness, boards, comments and remembered quotas enf
     assert.equal((await call('me',undefined,'admin')).body.user.isAdmin,true);
     assert.equal((await call('community/nickname-check',{nickname:'coach_a',email:'c@test.com'},'anon')).body.available,false);
     assert.equal((await call('community/post-save',{board:'notices',title:'공지',content:'내용'})).status,403);
-    const notice=await call('community/post-save',{board:'notices',title:'공지',content:'운영 안내'},'admin');assert.equal(notice.status,201);
+    const notice=await call('community/post-save',{board:'notices',title:'공지',content:'운영 안내'},'admin');assert.equal(notice.status,201);assert.equal((await call('community/list',{board:'notices'},'anon')).body.canWrite,false);const publicPost=await call('community/post',{postId:notice.body.postId},'anon');assert.equal(publicPost.status,200);assert.equal(publicPost.body.post.canManage,false);assert.equal((await call('community/comment-save',{postId:notice.body.postId,content:'anonymous'},'anon')).status,401);
     const post=await call('community/post-save',{board:'free',title:'글',content:'내용'});assert.equal(post.status,201);const postId=post.body.postId;
     assert.equal((await call('community/post-save',{postId,title:'다른 회원 수정',content:'내용'},'b')).status,403);
     assert.equal((await call('community/post-delete',{postId},'b')).status,403);

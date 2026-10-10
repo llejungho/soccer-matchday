@@ -27,10 +27,20 @@ export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
   const url=new URL(request.url),path=url.pathname;
   if(path==='/api/social/providers')return answer(200,{providers:providerStatus(env)});
   const start=/^\/api\/social\/start\/(naver|kakao|google)$/.exec(path),callback=/^\/api\/social\/callback\/(naver|kakao|google)$/.exec(path);
+  const productionHost='soccer-matchday-b16.pages.dev';
+  const base=new URL(env.SOCIAL_BASE_URL||((url.hostname===productionHost||url.hostname.endsWith('.'+productionHost))?'https://'+productionHost:url.origin));
+  if((start||callback)&&url.origin!==base.origin){
+    // Move to the registered service before creating state/cookies. Individual
+    // Cloudflare deployment URLs are not registered OAuth callback hosts.
+    const destination=new URL(start?path:'/',base);
+    if(start&&url.searchParams.get('consent')==='1')destination.searchParams.set('consent','1');
+    if(callback)destination.searchParams.set('social','restart');
+    return answer(302,null,{Location:destination.href});
+  }
   if(start){
     const id=start[1],p=providers[id],config=settings(env,id);if(!config.id||!config.secret)return answer(503,{error:'해당 SNS 로그인은 아직 준비 중입니다. 이메일로 이용해 주세요.'});
     const state=random(),verifier=random();await db.transaction(async()=>{await db.prepare('DELETE FROM oauth_states WHERE expires_at<=?').run(Date.now());await db.prepare('INSERT INTO oauth_states VALUES(?,?,?,?)').run(hash(state),id,verifier,Date.now()+600000);});
-    const destination=new URL(p.authorize);for(const [key,value] of Object.entries({response_type:'code',client_id:config.id,redirect_uri:url.origin+'/api/social/callback/'+id,state,...(p.scope?{scope:p.scope}:{})}))destination.searchParams.set(key,value);
+    const destination=new URL(p.authorize);for(const [key,value] of Object.entries({response_type:'code',client_id:config.id,redirect_uri:base.origin+'/api/social/callback/'+id,state,...(p.scope?{scope:p.scope}:{})}))destination.searchParams.set(key,value);
     if(id==='naver'&&url.searchParams.get('consent')==='1')destination.searchParams.set('auth_type','reprompt');
     if(p.pkce){destination.searchParams.set('code_challenge',createHash('sha256').update(verifier).digest('base64url'));destination.searchParams.set('code_challenge_method','S256');}
     return answer(302,null,{Location:destination.href,'Set-Cookie':setCookie(request,'oauth_state',state,600)});
@@ -43,7 +53,7 @@ export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
     if(url.searchParams.has('error'))return answer(302,null,{Location:'/?social=cancelled','Set-Cookie':setCookie(request,'oauth_state','',0)});
     const code=url.searchParams.get('code');if(!code)return answer(400,{error:'SNS 인증 코드가 없습니다.'});
     const config=settings(env,id);if(!config.id||!config.secret)return answer(503,{error:'SNS 로그인 연결을 준비 중입니다.'});
-    const values={grant_type:'authorization_code',client_id:config.id,client_secret:config.secret,code,redirect_uri:url.origin+'/api/social/callback/'+id,...(id==='naver'?{state}:{}),...(p.pkce?{code_verifier:record.verifier}:{})};
+    const values={grant_type:'authorization_code',client_id:config.id,client_secret:config.secret,code,redirect_uri:base.origin+'/api/social/callback/'+id,...(id==='naver'?{state}:{}),...(p.pkce?{code_verifier:record.verifier}:{})};
     const token=await fetchJson(fetcher,p.token,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(values)});if(!token.access_token)throw new Error('SNS 인증을 완료하지 못했습니다.');
     const profile=await fetchJson(fetcher,p.profile,{headers:{Authorization:'Bearer '+token.access_token}});
     // Provider calls may take seconds; all subsequent account reads start from
@@ -60,6 +70,7 @@ export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
   if(!pending)return answer(400,{error:'SNS 인증이 만료되었습니다. 다시 로그인하세요.'});
   const identity=await db.prepare('SELECT u.* FROM social_identities s JOIN users u ON u.id=s.user_id WHERE s.provider=? AND s.subject=?').get(pending.provider,pending.subject);
   const existing=await db.prepare('SELECT * FROM users WHERE email=?').get(pending.email);
+  if((identity&&identity.status!=='active')||(existing&&existing.status!=='active'))return answer(403,{error:'이용이 제한되었거나 탈퇴한 계정입니다.'});
   if(path==='/api/social/pending')return answer(200,{provider:pending.provider,name:providers[pending.provider].name,email:pending.email,kind:identity?'login':existing?'link':'signup',needsPassword:!!existing?.password_hash,canLink:!!user&&user.id===existing?.id});
   if(path==='/api/social/cancel'){await db.prepare('DELETE FROM oauth_pending WHERE token_hash=?').run(pending.token_hash);return answer(200,{ok:true},{'Set-Cookie':setCookie(request,'oauth_pending','',0)});}
   if(path!=='/api/social/finish')return answer(404,{error:'찾을 수 없는 요청입니다.'});

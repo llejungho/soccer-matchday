@@ -1,6 +1,6 @@
 import {scrypt,randomBytes,timingSafeEqual} from 'node:crypto';
 import {promisify} from 'node:util';
-import {isAdmin,nicknameError,nicknameKey,publicUser} from './community.mjs';
+import {isAdmin,nicknameError,nicknameKey,publicUser,ADMIN_EMAIL} from './community.mjs';
 const derive=promisify(scrypt);
 export const accountSchema=`CREATE TABLE IF NOT EXISTS account_security_attempts(user_id INTEGER PRIMARY KEY REFERENCES users(id),count INTEGER NOT NULL,until INTEGER NOT NULL);`;
 export async function verifyPassword(db,user,input){
@@ -16,14 +16,54 @@ export async function verifyPassword(db,user,input){
 export async function handleAccount(db,path,user,input={}){
   const error=(status,error,field)=>({status,body:{error,...(field?{field}:{})}});
   if(!user)return error(401,'로그인해 주세요.');
+  if(path==='/api/account/withdraw'){
+    if(isAdmin(user))return error(403,'운영자 계정은 탈퇴할 수 없습니다.');
+    if(input.confirmation!=='회원탈퇴'||input.email!==user.email)return error(400,'이메일과 회원탈퇴 확인 문구를 정확히 입력하세요.');
+    const account=await db.prepare('SELECT * FROM users WHERE id=?').get(user.id);
+    if(account.password_hash&&!await verifyPassword(db,account,input.currentPassword))return error(401,'현재 암호를 확인하세요.');
+    await db.transaction(async()=>{
+      const owned='SELECT id FROM teams WHERE owner_id=?',players='SELECT id FROM players WHERE team_id IN ('+owned+')',squads='SELECT id FROM squads WHERE team_id IN ('+owned+')';
+      for(const table of ['squad_shares','squad_outcomes'])await db.prepare(`DELETE FROM ${table} WHERE squad_id IN (${squads})`).run(user.id);
+      await db.prepare(`DELETE FROM squads WHERE team_id IN (${owned})`).run(user.id);
+      await db.prepare(`DELETE FROM player_chemistry WHERE player_a IN (${players}) OR player_b IN (${players})`).run(user.id,user.id);
+      for(const table of ['player_custom_ratings','player_profiles','player_quota_defaults'])await db.prepare(`DELETE FROM ${table} WHERE player_id IN (${players})`).run(user.id);
+      await db.prepare('DELETE FROM player_quota_defaults WHERE user_id=?').run(user.id);
+      await db.prepare(`DELETE FROM players WHERE team_id IN (${owned})`).run(user.id);
+      for(const table of ['team_tactics','team_rating_fields','team_basic_rating_fields','team_formations','team_transfers'])await db.prepare(`DELETE FROM ${table} WHERE team_id IN (${owned})`).run(user.id);
+      await db.prepare('DELETE FROM team_transfers WHERE sender_id=? OR recipient_id=?').run(user.id,user.id);
+      await db.prepare(`DELETE FROM team_preferences WHERE user_id=? OR team_id IN (${owned})`).run(user.id,user.id);
+      await db.prepare('DELETE FROM teams WHERE owner_id=?').run(user.id);
+      for(const table of ['sessions','social_identities','account_security_attempts','board_recommendations'])await db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(user.id);
+      await db.prepare('DELETE FROM board_views WHERE viewer_key=?').run('user:'+user.id);
+      await db.prepare('DELETE FROM oauth_pending WHERE email=?').run(user.email);
+      await db.prepare("UPDATE users SET status='withdrawn',email=?,nickname='탈퇴회원',nickname_key=?,password_hash='',salt='' WHERE id=?").run('withdrawn-'+user.id+'-'+randomBytes(16).toString('hex')+'@account.invalid','withdrawn:'+user.id,user.id);
+    });
+    return {status:200,body:{ok:true,signedOut:true}};
+  }
+  if(path==='/api/account/admin-status'){
+    if(!isAdmin(user))return error(403,'관리자만 변경할 수 있습니다.');
+    if(!Number.isSafeInteger(input.userId)||!['active','banned'].includes(input.status))return error(400,'회원과 처리 방법을 확인하세요.');
+    const target=await db.prepare('SELECT * FROM users WHERE id=?').get(input.userId);
+    if(!target||target.status==='withdrawn')return error(404,'처리할 회원이 없습니다.');
+    if(target.email===ADMIN_EMAIL)return error(403,'운영자 계정은 강퇴할 수 없습니다.');
+    await db.transaction(async()=>{
+      await db.prepare('UPDATE users SET status=? WHERE id=?').run(input.status,target.id);
+      if(input.status==='banned'){
+        await db.prepare('DELETE FROM sessions WHERE user_id=?').run(target.id);
+        await db.prepare('DELETE FROM oauth_pending WHERE email=?').run(target.email);
+      }
+    });
+    return {status:200,body:{ok:true}};
+  }
   if(path==='/api/account/admin-users'){
     if(!isAdmin(user))return error(403,'관리자만 접근할 수 있습니다.');
-    return {status:200,body:{users:await db.prepare("SELECT email,nickname FROM users ORDER BY id DESC").all()}};
+    return {status:200,body:{users:await db.prepare("SELECT id,email,nickname,status FROM users WHERE status!='withdrawn' ORDER BY id DESC").all()}};
   }
   if(path==='/api/account/profile'){
     const account=await db.prepare('SELECT id,email,nickname,password_hash FROM users WHERE id=?').get(user.id);
     const linked=await db.prepare('SELECT provider FROM social_identities WHERE user_id=? ORDER BY provider').all(user.id);
-    return {status:200,body:{user:publicUser(account),hasPassword:!!account.password_hash,linked:linked.map(p=>p.provider)}};
+    const ownedTeams=(await db.prepare('SELECT COUNT(*) AS n FROM teams WHERE owner_id=?').get(user.id)).n;
+    return {status:200,body:{user:publicUser(account),hasPassword:!!account.password_hash,linked:linked.map(p=>p.provider),ownedTeams}};
   }
   if(path==='/api/account/nickname'){
     const issue=nicknameError(input.nickname,user.email);if(issue)return error(400,issue,'nickname');

@@ -18,6 +18,7 @@ export function initializeCommunity(db) {
   const columns=db.prepare('PRAGMA table_info(users)').all().map(c=>c.name);
   if(!columns.includes('nickname'))db.exec('ALTER TABLE users ADD COLUMN nickname TEXT');
   if(!columns.includes('nickname_key'))db.exec('ALTER TABLE users ADD COLUMN nickname_key TEXT');
+  if(!columns.includes('status'))db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','banned','withdrawn'))");
   db.exec("UPDATE users SET nickname=CASE WHEN email='llee86@naver.com' THEN '관리자' ELSE '회원'||id END, nickname_key=CASE WHEN email='llee86@naver.com' THEN '관리자' ELSE '회원'||id END WHERE nickname_key IS NULL;");
   db.exec(communitySchema);
 }

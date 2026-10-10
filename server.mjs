@@ -38,7 +38,7 @@ function json(res, status, body) {
 function userFor(req) {
   const token = /(?:^|;\s*)session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || '')?.[1];
   if (!token) return null;
-  return db.prepare('SELECT users.id, users.email, users.nickname FROM sessions JOIN users ON users.id = sessions.user_id WHERE token_hash = ? AND expires_at > ?').get(digest(token), Date.now()) || null;
+  return db.prepare('SELECT users.id, users.email, users.nickname FROM sessions JOIN users ON users.id = sessions.user_id WHERE token_hash = ? AND expires_at > ? AND users.status = \'active\'').get(digest(token), Date.now()) || null;
 }
 function signIn(res, user) {
   const token = randomBytes(32).toString('hex');
@@ -54,7 +54,7 @@ async function body(req) {
   }
   return JSON.parse(content);
 }
-async function socialOrAccount(req,res,url,input){const adapter=asyncDatabase(db),user=userFor(req),request=new Request('http://'+req.headers.host+req.url,{method:req.method,headers:req.headers});const result=url.pathname.startsWith('/api/account/')?await handleAccount(adapter,url.pathname,user,input):await handleSocial(adapter,request,process.env,user,input);const body={...result.body};if(body.signInUser||body.renewSession){signIn(res,body.signInUser?db.prepare('SELECT * FROM users WHERE id=?').get(body.signInUser):body.user);delete body.signInUser;delete body.renewSession;}for(const [key,value] of Object.entries(result.headers||{})){if(key==='Set-Cookie'&&res.getHeader(key))res.setHeader(key,[res.getHeader(key),value]);else res.setHeader(key,value);}return json(res,result.status,result.body===null?null:body);}
+async function socialOrAccount(req,res,url,input){const adapter=asyncDatabase(db),user=userFor(req),request=new Request('http://'+req.headers.host+req.url,{method:req.method,headers:req.headers});const result=url.pathname.startsWith('/api/account/')?await handleAccount(adapter,url.pathname,user,input):await handleSocial(adapter,request,process.env,user,input);const body={...result.body};if(body.signedOut)res.setHeader('Set-Cookie','session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');if(body.signInUser||body.renewSession){signIn(res,body.signInUser?db.prepare('SELECT * FROM users WHERE id=?').get(body.signInUser):body.user);delete body.signInUser;delete body.renewSession;}for(const [key,value] of Object.entries(result.headers||{})){if(key==='Set-Cookie'&&res.getHeader(key))res.setHeader(key,[res.getHeader(key),value]);else res.setHeader(key,value);}return json(res,result.status,result.body===null?null:body);}
 const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
@@ -118,11 +118,11 @@ const server = http.createServer(async (req, res) => {
       const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
       const hash = await derive(password, user?.salt || 'invalid-user-timing-salt', 64);
       const stored=Buffer.from(user?.password_hash||'','hex');
-      if (!user || stored.length!==hash.length || !timingSafeEqual(hash, stored)) return json(res, 401, { error: '이메일 또는 암호를 확인해 주세요.' });
+      if (!user || user.status !== 'active' || stored.length!==hash.length || !timingSafeEqual(hash, stored)) return json(res, 401, { error: '이메일 또는 암호를 확인해 주세요.' });
       signIn(res, user);
       return json(res, 200, { user: publicUser(user) });
     }
-    const files = { '/about':['about.html','text/html'], '/about.html':['about.html','text/html'], '/about.css':['about.css','text/css'], '/assets/naver-login.png':['assets/naver-login.png','image/png'], '/account.js':['account.js','text/javascript'], '/social.js':['social.js','text/javascript'], '/community.js':['community.js','text/javascript'], '/quota-defaults.js':['quota-defaults.js','text/javascript'], '/squad-history.js': ['squad-history.js','text/javascript'], '/squads.js': ['squads.js', 'text/javascript'], '/squad-engine.js': ['squad-engine.js','text/javascript'], '/squad-view.js': ['squad-view.js','text/javascript'], '/shared.js': ['shared.js','text/javascript'], '/squads.css': ['squads.css','text/css'], '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/teams.js': ['teams.js','text/javascript'], '/teams.css': ['teams.css','text/css'], '/profiles.css': ['profiles.css','text/css'], '/styles.css': ['styles.css','text/css'] };
+    const files = { '/notices':['notices.html','text/html'], '/notices.html':['notices.html','text/html'], '/notices.js':['notices.js','text/javascript'], '/about':['about.html','text/html'], '/about.html':['about.html','text/html'], '/about.css':['about.css','text/css'], '/assets/naver-login.png':['assets/naver-login.png','image/png'], '/account.js':['account.js','text/javascript'], '/social.js':['social.js','text/javascript'], '/community.js':['community.js','text/javascript'], '/quota-defaults.js':['quota-defaults.js','text/javascript'], '/squad-history.js': ['squad-history.js','text/javascript'], '/squads.js': ['squads.js', 'text/javascript'], '/squad-engine.js': ['squad-engine.js','text/javascript'], '/squad-view.js': ['squad-view.js','text/javascript'], '/shared.js': ['shared.js','text/javascript'], '/squads.css': ['squads.css','text/css'], '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/teams.js': ['teams.js','text/javascript'], '/teams.css': ['teams.css','text/css'], '/profiles.css': ['profiles.css','text/css'], '/styles.css': ['styles.css','text/css'] };
     if(req.method==='GET'&&/^\/guide\/[a-z0-9-]+\.png$/.test(url.pathname)){res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-cache'});return res.end(readFileSync(path.join(root,'public',url.pathname)));}
     if (req.method === 'GET' && files[url.pathname]) {
       const [file, type] = files[url.pathname];

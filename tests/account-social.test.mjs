@@ -16,13 +16,19 @@ for(const runtime of ['SQLite','D1'])test(runtime+' protects nickname, password 
   const social=async(request,input,fetcher)=>handleSocial(await fresh(),request,env,null,input,fetcher);
   const request=(path,cookie='',method='GET')=>new Request('https://test.pages.dev'+path,{method,headers:{cookie}});
   try{
+    for(const provider of ['naver','kakao']){
+      const preview=await social(new Request('https://preview.soccer-matchday-b16.pages.dev/api/social/start/'+provider));
+      assert.equal(preview.status,302);assert.equal(preview.headers.Location,'https://soccer-matchday-b16.pages.dev/api/social/start/'+provider);assert.equal(preview.headers['Set-Cookie'],undefined);
+      const canonical=await social(new Request(preview.headers.Location));
+      assert.equal(new URL(canonical.headers.Location).searchParams.get('redirect_uri'),'https://soccer-matchday-b16.pages.dev/api/social/callback/'+provider);
+    }
     const reprompt=await social(request('/api/social/start/naver?consent=1'));
     assert.equal(new URL(reprompt.headers.Location).searchParams.get('auth_type'),'reprompt');
     const retryState=new URL(reprompt.headers.Location).searchParams.get('state');
     const missing=await social(request('/api/social/callback/naver?state='+retryState+'&code=code',reprompt.headers['Set-Cookie'].split(';')[0]),{},async url=>Response.json(url.includes('/token')?{access_token:'test-token'}:{response:{id:'no-email-subject'}}));
     assert.equal(missing.status,302);assert.equal(missing.headers.Location,'/?social=email-required&provider=naver');
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM oauth_pending').get().n,0);
-    assert.equal((await account('admin-users',a,{})).status,403);const list=(await account('admin-users',admin,{})).body.users;assert.equal(list.length,3);assert.deepEqual(Object.keys(list[0]).sort(),['email','nickname']);
+    assert.equal((await account('admin-users',a,{})).status,403);const list=(await account('admin-users',admin,{})).body.users;assert.equal(list.length,3);assert.deepEqual(Object.keys(list[0]).sort(),['email','id','nickname','status']);
     assert.equal((await account('nickname',a,{nickname:'감독B'})).status,409);assert.equal((await account('nickname',a,{nickname:'바뀐감독'})).status,200);
     assert.equal((await account('nickname',admin,{nickname:'운영자'})).status,400);
     sqlite.prepare('INSERT INTO sessions VALUES(?,?,?)').run('old-session',a.id,Date.now()+60000);

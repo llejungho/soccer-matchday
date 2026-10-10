@@ -20,6 +20,8 @@ Cloudflare → Workers & Pages → soccer-matchday → Settings → Variables an
 
 ## 카카오
 
+처음 앱을 만들 때는 [KAKAO_LOGIN_SETUP.md](KAKAO_LOGIN_SETUP.md)의 입력값과 절차를 따르세요.
+
 [카카오 개발자 콘솔](https://developers.kakao.com/)에서 앱을 만들고 웹 도메인과 Redirect URI를 등록합니다. 카카오 로그인을 활성화하고 이메일(account_email) 동의 항목을 허용합니다. 이 코드의 CLIENT_ID에는 **REST API 키**, CLIENT_SECRET에는 **카카오 로그인 Client Secret**을 사용하며 Client Secret을 활성화합니다. 이메일 동의 항목은 앱 권한/상태에 따라 추가 신청이 필요할 수 있습니다. [공식 REST API 문서](https://developers.kakao.com/docs/ko/kakaologin/rest-api).
 
 ## 구글

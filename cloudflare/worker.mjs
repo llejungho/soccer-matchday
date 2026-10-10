@@ -19,7 +19,7 @@ const headers={
 const json=(status,body,extra={})=>Response.json(body,{status,headers:{...headers,'Cache-Control':'no-store',...extra}});
 async function userFor(db,request){
   const token=tokenFor(request);
-  return token?await db.prepare('SELECT users.id,users.email,users.nickname FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires_at>?').get(digest(token),Date.now()):null;
+  return token?await db.prepare('SELECT users.id,users.email,users.nickname FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires_at>? AND users.status=\'active\'').get(digest(token),Date.now()):null;
 }
 async function signIn(db,request,user){
   const token=randomBytes(32).toString('hex');
@@ -62,11 +62,11 @@ async function auth(binding,request,path,input){
   const user=await binding.prepare('SELECT * FROM users WHERE email=?').bind(email).first();
   const hash=await derive(password,user?.salt||'invalid-user-timing-salt',64);
   const stored=Buffer.from(user?.password_hash||'','hex');
-  if(!user||stored.length!==hash.length||!timingSafeEqual(hash,stored))return json(401,{error:'이메일 또는 암호를 확인해 주세요.'});
+  if(!user||user.status!=='active'||stored.length!==hash.length||!timingSafeEqual(hash,stored))return json(401,{error:'이메일 또는 암호를 확인해 주세요.'});
   const db=await new Database(binding).start();
   return json(200,{user:publicUser(user)},{'Set-Cookie':await signIn(db,request,user)});
 }
-async function domainResponse(db,request,result){const body={...result.body};const response=new Response(result.body===null?null:JSON.stringify(body),{status:result.status,headers:{...headers,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...result.headers}});if(body.signInUser||body.renewSession){const account=body.signInUser?await db.prepare('SELECT id,email,nickname FROM users WHERE id=?').get(body.signInUser):body.user;response.headers.append('Set-Cookie',await signIn(db,request,account));delete body.signInUser;delete body.renewSession;return new Response(JSON.stringify(body),{status:result.status,headers:response.headers});}return response;}
+async function domainResponse(db,request,result){const body={...result.body};if(body.signedOut)result.headers={...result.headers,'Set-Cookie':cookie(request,'',0)};const response=new Response(result.body===null?null:JSON.stringify(body),{status:result.status,headers:{...headers,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...result.headers}});if(body.signInUser||body.renewSession){const account=body.signInUser?await db.prepare('SELECT id,email,nickname FROM users WHERE id=?').get(body.signInUser):body.user;response.headers.append('Set-Cookie',await signIn(db,request,account));delete body.signInUser;delete body.renewSession;return new Response(JSON.stringify(body),{status:result.status,headers:response.headers});}return response;}
 export default {
   async fetch(request,env){
     const url=new URL(request.url),path=url.pathname;
