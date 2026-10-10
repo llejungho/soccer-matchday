@@ -56,3 +56,29 @@ test('squad ownership, persistence, manual validation and sanitized share snapsh
     assert.equal(call('load',{squadId:id},2).body.config.players[0].comment,'');
   }finally{db.close();}
 });
+
+
+test('availability excludes late, early, absent and guest keepers in both allocation modes',()=>{
+  const players=Array.from({length:14},(_,i)=>player(i+1,['CF','CM','CB'][i%3],false,2));
+  players[0].availableQuarters=[2,3];players[1].availableQuarters=[0,1];players[2].availableQuarters=[];players[2].quota=0;
+  players.push({...player(20,'GK',true,2),key:'g:early',availableQuarters:[0,1]}, {...player(21,'GK',true,2),key:'g:late',availableQuarters:[2,3]});
+  for(const mode of ['individual','fair']){
+    const plan=generate(players,quarters,mode);
+    plan.quarters.forEach((q,qi)=>q.halves.forEach(half=>half.filter(Boolean).forEach(key=>assert.ok((players.find(p=>p.key===key).availableQuarters??[0,1,2,3]).includes(qi)))));
+    assert.equal(totals(plan.quarters,players).find(p=>p.id===3).actual,0);
+    for(const q of plan.quarters.slice(0,2))assert.deepEqual(q.halves[0],q.halves[1]);
+    for(let qi=0;qi<4;qi++)assert.equal(plan.quarters[qi].halves[0][10],qi<2?'g:early':'g:late');
+  }
+});
+
+test('API persists availability and rejects unavailable manual assignments and invalid indices',()=>{
+ const db=new DatabaseSync(':memory:');try{
+ db.exec("CREATE TABLE users(id INTEGER PRIMARY KEY,email TEXT);INSERT INTO users VALUES(1,'test@example.com');");initializeTeams(db);initializeSquads(db);
+ db.exec("INSERT INTO teams(id,owner_id,name,color) VALUES(1,1,'A','#123456');INSERT INTO players VALUES(1,1,'선수');INSERT INTO player_profiles(player_id,positions) VALUES(1,'[\"CF\"]');");
+ const config={name:'참석 테스트',quarters:quarters.map(q=>({formation:q.formation,tacticId:null})),attendees:[{playerId:1,quota:2,keeper:false,availableQuarters:[2,3]}],guests:[],mode:'individual'};
+ const call=(route,input)=>handleSquads(db,'/api/squads/'+route,{id:1},{teamId:1,...input});
+ const saved=call('generate',{config});assert.equal(saved.status,200);assert.deepEqual(call('load',{squadId:saved.body.id}).body.config.attendees[0].availableQuarters,[2,3]);
+ const bad=structuredClone(saved.body.result);bad.quarters[0].halves[0][0]='p:1';assert.equal(call('save',{squadId:saved.body.id,config,result:bad}).status,400);
+ for(const availableQuarters of [[4],[-1],[1,1],['1']])assert.equal(call('generate',{config:{...config,attendees:[{...config.attendees[0],availableQuarters}]}}).status,400);
+ }finally{db.close();}
+});

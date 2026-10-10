@@ -42,6 +42,12 @@ test('Cloudflare API preserves legacy login and supports profiles, squads, resul
     const deleted=await call('/api/teams/ratings/delete',{teamId,builtinKey:'aggression'});assert.equal(deleted.status,200);assert.equal(deleted.body.players[0].ratings.aggression,null);
     assert.equal((await call('/api/squads/formations',{teamId,code:'532',action:'add'})).status,200);
     const config={name:'Cloud test',quarters:[{formation:'532',tacticId:null},{formation:'442',tacticId:null}],attendees:roster.map((p,i)=>({playerId:p.id,quota:2,keeper:i===10})),guests:[],mode:'individual'};
+    const availabilityConfig={...config,name:'Availability',attendees:config.attendees.map((p,i)=>i===0?{...p,quota:1,availableQuarters:[1]}:p)};
+    const availabilityPlan=await call('/api/squads/generate',{teamId,config:availabilityConfig});assert.equal(availabilityPlan.status,200);
+    assert.deepEqual((await call('/api/squads/load',{teamId,squadId:availabilityPlan.body.id})).body.config.attendees[0].availableQuarters,[1]);
+    assert.ok(!availabilityPlan.body.result.quarters[0].halves.flat().includes('p:'+roster[0].id));
+    const unavailableEdit=structuredClone(availabilityPlan.body.result);unavailableEdit.quarters[0].halves[0][0]='p:'+roster[0].id;
+    assert.equal((await call('/api/squads/save',{teamId,squadId:availabilityPlan.body.id,config:availabilityConfig,result:unavailableEdit})).status,400);
     const generated=await call('/api/squads/generate',{teamId,config});assert.equal(generated.status,200,JSON.stringify(generated.body));const squadId=generated.body.id;
     assert.equal(generated.body.result.quarters.length,2);
     assert.equal((await call('/api/squads/outcomes',{teamId,squadId,outcomes:['win','bad']})).status,400);

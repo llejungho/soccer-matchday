@@ -1,7 +1,7 @@
 import {buildHistory,historyAnalysis} from './public/squad-history.js';
 import { randomBytes } from 'node:crypto';
 import { state } from './teams.mjs';
-import { generate, positions, formations, slotsFor } from './public/squad-engine.js';
+import { generate, positions, formations, slotsFor, normalizeAvailability } from './public/squad-engine.js';
 export function initializeSquads(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS squads(id INTEGER PRIMARY KEY AUTOINCREMENT,team_id INTEGER NOT NULL REFERENCES teams(id),name TEXT NOT NULL,config TEXT NOT NULL,result TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS squad_shares(token TEXT PRIMARY KEY,squad_id INTEGER NOT NULL REFERENCES squads(id) ON DELETE CASCADE,snapshot TEXT NOT NULL);
@@ -27,20 +27,20 @@ function normalize(input,teamState,enabled) {
   if(!['fair','individual'].includes(mode))fail('배분 방식을 선택해 주세요.');
   if(!Array.isArray(attendees)||!Array.isArray(guests)||attendees.length+guests.length>100)fail('참석자는 최대 100명입니다.');
   const selected=new Set();
-  const validateQuota=p=>{if(typeof p.keeper!=='boolean'||typeof p.quota!=='number'||!Number.isFinite(p.quota)||p.quota<0||p.quota>quarters.length||!Number.isInteger(p.quota*2))fail('출전량은 쿼터 수 이내의 0.5 단위로 선택해 주세요.');};
+  const validateQuota=p=>{normalizeAvailability(p,quarters.length);if(p.quota>normalizeAvailability(p,quarters.length).length)fail('출전량은 참석 가능한 쿼터 수 이내로 선택해 주세요.');if(typeof p.keeper!=='boolean'||typeof p.quota!=='number'||!Number.isFinite(p.quota)||p.quota<0||p.quota>quarters.length||!Number.isInteger(p.quota*2))fail('출전량은 쿼터 수 이내의 0.5 단위로 선택해 주세요.');};
   const players=attendees.map(p=>{
     validateQuota(p);const member=teamState.players.find(member=>member.id===p.playerId);
     if(!member||selected.has(member.id))fail('현재 팀의 서로 다른 선수를 선택해 주세요.');selected.add(member.id);
-    return {...member,key:'p:'+member.id,keeper:member.positions[0]==='GK',quota:p.quota};
+    return {...member,key:'p:'+member.id,keeper:member.positions[0]==='GK',quota:p.quota,availableQuarters:normalizeAvailability(p,quarters.length)};
   });
   const guestKeys=new Set();
   for(const g of guests){
     validateQuota(g);
     if(typeof g.key!=='string'||!/^g:[a-zA-Z0-9-]{1,50}$/.test(g.key)||guestKeys.has(g.key)||typeof g.name!=='string'||!g.name.trim()||g.name.length>60||!Array.isArray(g.positions)||g.positions.length!==1||!positions.includes(g.positions[0]))fail('용병은 이름과 포지션 한 개를 입력해 주세요.');guestKeys.add(g.key);
-    players.push({key:g.key,name:g.name.trim(),positions:g.positions,keeper:g.positions[0]==='GK',quota:g.quota,ratings:{},customRatings:{},chemistry:{good:[],bad:[]},comment:''});
+    players.push({key:g.key,name:g.name.trim(),positions:g.positions,keeper:g.positions[0]==='GK',quota:g.quota,availableQuarters:normalizeAvailability(g,quarters.length),ratings:{},customRatings:{},chemistry:{good:[],bad:[]},comment:''});
   }
   if(mode==='individual'&&players.filter(p=>!p.keeper).reduce((sum,p)=>sum+p.quota,0)>quarters.length*10)fail(`필드 출전량 합계는 ${quarters.length*10}쿼터를 넘을 수 없습니다.`);
-  return {name:name.trim(),quarters:normalizedQuarters,attendees:players.filter(p=>p.key.startsWith('p:')).map(p=>({playerId:p.id,quota:p.quota,keeper:p.keeper})),guests:players.filter(p=>p.key.startsWith('g:')).map(p=>({key:p.key,name:p.name,positions:p.positions,keeper:p.keeper,quota:p.quota})),mode,players};
+  return {name:name.trim(),quarters:normalizedQuarters,attendees:players.filter(p=>p.key.startsWith('p:')).map(p=>({playerId:p.id,quota:p.quota,keeper:p.keeper,availableQuarters:p.availableQuarters})),guests:players.filter(p=>p.key.startsWith('g:')).map(p=>({key:p.key,name:p.name,positions:p.positions,keeper:p.keeper,quota:p.quota,availableQuarters:p.availableQuarters})),mode,players};
 }
 function validResult(result,config) {
   if(!result||!Array.isArray(result.quarters)||result.quarters.length!==config.quarters.length)fail('먼저 스쿼드를 자동 구성해 주세요.');
@@ -48,7 +48,7 @@ function validResult(result,config) {
   return {warnings:[],quarters:result.quarters.map((q,i)=>{
     if(!q||!Array.isArray(q.halves)||q.halves.length!==2)fail('쿼터별 전·후반 배치를 확인해 주세요.');
     const halves=q.halves.map(half=>{
-      if(!Array.isArray(half)||half.length!==11||half.some(k=>k!==null&&!keys.has(k))||new Set(half.filter(Boolean)).size!==half.filter(Boolean).length)fail('같은 전·후반에 한 선수를 중복 배치할 수 없습니다.');return half;
+      if(!Array.isArray(half)||half.length!==11||half.some(k=>k!==null&&!keys.has(k))||new Set(half.filter(Boolean)).size!==half.filter(Boolean).length)fail('같은 전·후반에 한 선수를 중복 배치할 수 없습니다.');if(half.some(k=>k&&!normalizeAvailability(config.players.find(p=>p.key===k),config.quarters.length).includes(i)))fail('참석 불가능한 쿼터에는 선수를 배치할 수 없습니다.');return half;
     });
     return {formation:config.quarters[i].formation,tacticName:config.quarters[i].tactic?.name||'기본 컨셉',halves,reason:typeof q.reason==='string' ? q.reason.slice(0,1000) : '감독이 직접 수정한 배치입니다. 출전량과 포지션을 최종 확인해 주세요.'};
   })};

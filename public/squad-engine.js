@@ -19,18 +19,20 @@ export function formationSlots(code) {
   });
 }
 export const slotsFor = formation => [...(Object.hasOwn(formations,formation)?formations[formation]:formationSlots(formation)),{pos:'GK',x:50,y:91}];
+export const availableQuarters=(person,count)=>person.availableQuarters??Array.from({length:count},(_,i)=>i);
+export function normalizeAvailability(person,count){const values=availableQuarters(person,count);if(!Array.isArray(values)||values.some(i=>!Number.isInteger(i)||i<0||i>=count)||new Set(values).size!==values.length)throw new Error('참석 가능한 쿼터를 확인해 주세요.');return [...values].sort((a,b)=>a-b);}
 export function quotaSummary(people,quarterCount,mode='individual') {
   const field=people.filter(p=>!p.keeper),assigned=field.reduce((sum,p)=>sum+p.quota,0),capacity=quarterCount*10;
-  return {capacity,assigned:mode==='fair'?Math.min(capacity,field.length*quarterCount):assigned,remaining:Math.max(0,capacity-assigned)};
+  return {capacity,assigned:mode==='fair'?Math.min(capacity,field.reduce((sum,p)=>sum+availableQuarters(p,quarterCount).length,0)):assigned,remaining:Math.max(0,capacity-assigned)};
 }
 export function assignQuota(people,person,requested,quarterCount) {
   const other=people.filter(p=>p!==person&&!p.keeper).reduce((sum,p)=>sum+p.quota,0);
-  const quota=Math.max(0,Math.min(requested,quarterCount,person.keeper?quarterCount:quarterCount*10-other));
+  const quota=Math.max(0,Math.min(requested,availableQuarters(person,quarterCount).length,person.keeper?quarterCount:quarterCount*10-other));
   person.quota=quota;return {quota,adjusted:quota!==requested};
 }
 export function clampQuotas(people,quarterCount) {
   let remaining=quarterCount*10,adjusted=false;
-  for(const p of people){const before=p.quota;p.quota=Math.min(p.quota,quarterCount,p.keeper?quarterCount:remaining);if(!p.keeper)remaining-=p.quota;adjusted ||= before!==p.quota;}
+  for(const p of people){const before=p.quota;p.quota=Math.min(p.quota,availableQuarters(p,quarterCount).length,p.keeper?quarterCount:remaining);if(!p.keeper)remaining-=p.quota;adjusted ||= before!==p.quota;}
   return adjusted;
 }
 const family = pos => ['CF','SS','LW','RW'].includes(pos) ? 'attack' : ['LWB','RWB','CB'].includes(pos) ? 'defense' : pos === 'GK' ? 'keeper' : 'midfield';
@@ -64,7 +66,7 @@ function quality(player,slot,tactic,fields,history,q) {
   if(/킥.*런/.test(text)&&/롱킥|롱패스|헤딩|공중볼|빠른|스피드/.test(comment))score+=20;
   return score+historyScore(history,player,slot.pos,q);
 }
-function minCostAssignments(players,quarters,targets,fields,history,full=false,minimum=[]) {
+function minCostAssignments(players,quarters,targets,fields,history,full=false,minimum=[],offset=0) {
   const graph=[]; const addNode=()=>{graph.push([]);return graph.length-1;};
   const source=addNode(),sink=addNode();
   function edge(a,b,cap,cost) {const f={to:b,rev:graph[b].length,cap,cost};graph[a].push(f);graph[b].push({to:a,rev:graph[a].length-1,cap:0,cost:-cost});return f;}
@@ -74,6 +76,7 @@ function minCostAssignments(players,quarters,targets,fields,history,full=false,m
   players.forEach((player,pi)=>{
     const id=addNode(),required=Math.min(targets[pi],minimum[pi]||0);edge(source,id,required,-1000000);edge(source,id,targets[pi]-required,0);
     quarters.forEach((q,qi)=>(full?[0]:[0,1]).forEach(half=>{
+      if(player.availableQuarters&&!player.availableQuarters.includes(qi+offset))return;
       const ph=addNode();edge(id,ph,1,0);
       for(const s of slotNodes.filter(s=>s.qi===qi&&s.half===half)) {
         if((s.slot.pos==='GK')!==player.keeper) continue;
@@ -115,6 +118,7 @@ function optimizePairs(result,players,quarters,fields,history) {
       for(let i=0;i<10;i++)for(let j=0;j<10;j++) {
         if(a===b&&i>=j)continue;
         const ka=a.keys[i],kb=b.keys[j];if(ka===kb)continue;
+        if((kb&&byKey.get(kb).availableQuarters&&!byKey.get(kb).availableQuarters.includes(a.qi))||(ka&&byKey.get(ka).availableQuarters&&!byKey.get(ka).availableQuarters.includes(b.qi)))continue;
         if(a!==b&&((kb&&a.keys.includes(kb))||(ka&&b.keys.includes(ka))))continue;
         const before=value(a.keys,a.qi)+(a===b?0:value(b.keys,b.qi));
         a.keys[i]=kb;b.keys[j]=ka;
@@ -129,26 +133,30 @@ export function totals(result,players) {return players.map(p=>({...p,actual:resu
 export function generate(players,quarters,mode,fields=[],basicFields=defaultBasicFields,history=null) {
   fields=[...fields,...basicFields.map(f=>({...f,basicKey:f.key}))];
   const halves=quarters.length*2,targets=players.map(p=>mode==='individual'?Math.round(p.quota*2):0);
+  const capacities=players.map(p=>availableQuarters(p,quarters.length).length*2);
   if(mode==='fair')for(const keeper of [false,true]) {
     const indices=players.map((p,i)=>p.keeper===keeper?i:-1).filter(i=>i>=0),unit=quarters.length<=2?2:1,capacity=halves*(keeper?1:10)/unit;
     indices.forEach((pi,index)=>targets[pi]=Math.min(halves,(Math.floor(capacity/indices.length)+(index<capacity%indices.length?1:0))*unit));
+    for(const i of indices)targets[i]=Math.min(targets[i],capacities[i]);
+    let remaining=halves*(keeper?1:10)-indices.reduce((sum,i)=>sum+targets[i],0);
+    while(remaining>0){const candidates=indices.filter(i=>targets[i]+unit<=capacities[i]&&unit<=remaining).sort((a,b)=>targets[a]-targets[b]||a-b);if(!candidates.length)break;targets[candidates[0]]+=unit;remaining-=unit;}
     const early=Math.min(2,quarters.length),later=halves-early*2,fullCapacity=early*(keeper?1:10);
     // Pair odd half-unit targets when full-quarter constraints require it.
     for(let step=0;step<indices.length;step++){
       const minSum=indices.reduce((sum,i)=>sum+Math.max(0,Math.ceil((targets[i]-later)/2)),0),maxSum=indices.reduce((sum,i)=>sum+Math.min(early,Math.floor(targets[i]/2)),0);
       if(minSum<=fullCapacity&&maxSum>=Math.min(fullCapacity,indices.length*early))break;
       const donor=indices.find(i=>targets[i]%2===1&&(minSum<=fullCapacity||targets[i]>later));
-      const recipient=indices.find(i=>i!==donor&&targets[i]%2===1&&targets[i]<halves);
+      const recipient=indices.find(i=>i!==donor&&targets[i]%2===1&&targets[i]<capacities[i]);
       if(donor===undefined||recipient===undefined)break;targets[donor]--;targets[recipient]++;
     }
   }
   const early=Math.min(2,quarters.length),later=halves-early*2;
-  const prefix=minCostAssignments(players,quarters.slice(0,early),targets.map(t=>Math.min(early,Math.floor(t/2))),fields,history,true,targets.map(t=>Math.max(0,Math.ceil((t-later)/2))));
+  const prefix=minCostAssignments(players,quarters.slice(0,early),targets.map((t,i)=>Math.min(availableQuarters(players[i],quarters.length).filter(q=>q<early).length,Math.floor(t/2))),fields,history,true,targets.map((t,i)=>Math.max(0,Math.ceil((t-availableQuarters(players[i],quarters.length).filter(q=>q>=early).length*2)/2))));
   const used=totals(prefix,players).map(p=>p.actual*2);
-  const tail=minCostAssignments(players,quarters.slice(early),targets.map((t,i)=>Math.max(0,t-used[i])),fields,history);
+  const tail=minCostAssignments(players,quarters.slice(early),targets.map((t,i)=>Math.max(0,t-used[i])),fields,history,false,[],early);
   const result=[...prefix,...tail];optimizePairs(result,players,quarters,fields,history);
   const warnings=[];const empty=result.reduce((sum,q)=>sum+q.halves.flat().filter(k=>!k).length,0);
-  if(empty)warnings.push(`인원 또는 출전량 부족으로 ${empty/2}쿼터분 자리가 비어 있습니다. 빈 자리를 직접 보완하거나 출전량을 늘려 주세요.`);
+  if(empty)warnings.push(`참석 가능한 인원 또는 출전량 부족으로 ${empty/2}쿼터분 자리가 비어 있습니다. 빈 자리를 직접 보완하거나 출전량을 늘려 주세요.`);
   const unfamiliar = new Set();
   result.forEach(q=>q.halves.forEach(half=>half.forEach((key,i)=>{const p=players.find(p=>p.key===key);if(p&&(!p.positions.length||!p.positions.includes(slotsFor(q.formation)[i].pos)))unfamiliar.add(p.name);}))); 
   if(unfamiliar.size)warnings.push(`선호 포지션 밖의 배치가 포함된 선수: ${[...unfamiliar].join(', ')}. 자리 수와 출전량을 맞추기 위한 배치이므로 직접 확인해 주세요.`);
@@ -157,9 +165,9 @@ export function generate(players,quarters,mode,fields=[],basicFields=defaultBasi
     const weights=tacticWeights(quarters[qi].tactic,fields);
     const labels=fields.filter(f=>weights[scoreKey(f)]).map(f=>f.name);
     let preferred=0,count=0;for(const keys of q.halves)keys.forEach((key,i)=>{if(key){count++;if(players.find(p=>p.key===key).positions[0]===slotsFor(q.formation)[i].pos)preferred++;}});
-    q.reason=`${q.tacticName}: ${labels.length?labels.join('·')+' 평가를 반영하고 ':''}1순위 포지션 ${preferred}/${count}개 반쿼터 자리에 배치했습니다. 선호 순위·출전량·특징·궁합을 함께 고려했습니다. ${qi<2?'전·후반 동일한 풀쿼터 배치입니다. ':''}`+historyReason(history,q.halves[0],players,{...quarters[qi],slots:slotsFor(q.formation)});
+    q.reason=`${q.tacticName}: ${labels.length?labels.join('·')+' 평가를 반영하고 ':''}1순위 포지션 ${preferred}/${count}개 반쿼터 자리에 배치했습니다. 참석 가능한 쿼터·선호 순위·출전량·특징·궁합을 함께 고려했습니다. ${qi<2?'전·후반 동일한 풀쿼터 배치입니다. ':''}`+historyReason(history,q.halves[0],players,{...quarters[qi],slots:slotsFor(q.formation)});
   }
   const fieldTargets=players.flatMap((p,i)=>p.keeper?[]:[targets[i]/2]);
-  if(mode==='fair'&&fieldTargets.length&&Math.max(...fieldTargets)-Math.min(...fieldTargets)>0.5)warnings.push('1·2쿼터 풀쿼터 출전을 유지하기 위해 공평 배분에 최대 1쿼터 차이가 생길 수 있습니다. 최종 출전량을 확인하세요.');
+  if(mode==='fair'&&fieldTargets.length&&Math.max(...fieldTargets)-Math.min(...fieldTargets)>0.5)warnings.push('참석 가능한 쿼터와 1·2쿼터 풀쿼터 조건에 따라 출전량에 차이가 생길 수 있습니다. 최종 출전량을 확인하세요.');
   return {quarters:result,warnings};
 }

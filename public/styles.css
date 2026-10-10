@@ -18,3 +18,5 @@
 #social-dialog-description{overflow-wrap:anywhere}
 
 .public-board{max-width:1100px;margin:0 auto;padding:32px 20px}.public-brand{font-size:24px;font-weight:800;color:#153d32;text-decoration:none}.withdrawal-section{border-color:#e0b5b5!important}.danger{background:#a12d2d!important;color:white!important}
+
+.login-notice-banner{display:flex;align-items:center;gap:14px;margin:0 0 28px;padding:18px;border:2px solid #254f38;border-radius:12px;background:#eaf2e4;color:#153d32;text-decoration:none}.login-notice-banner strong{display:block;font-size:22px}.login-notice-banner small{display:block;font-size:15px;margin-top:5px;line-height:1.5}.login-notice-icon{font-size:28px}.login-notice-action{margin-left:auto;font-size:15px;font-weight:700;white-space:nowrap}.login-notice-banner:hover{background:#deebd4}.login-notice-banner:focus-visible{outline:3px solid #7f9f53;outline-offset:3px}@media(max-width:600px){.login-notice-banner{flex-wrap:wrap}.login-notice-action{width:100%;margin-left:42px}}
