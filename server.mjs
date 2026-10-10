@@ -107,7 +107,7 @@ const server = http.createServer(async (req, res) => {
       signIn(res, user);
       return json(res, 200, { user: { id: user.id, email: user.email } });
     }
-    const files = { '/squads.js': ['squads.js', 'text/javascript'], '/squad-engine.js': ['squad-engine.js','text/javascript'], '/squad-view.js': ['squad-view.js','text/javascript'], '/shared.js': ['shared.js','text/javascript'], '/squads.css': ['squads.css','text/css'], '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/teams.js': ['teams.js', 'text/javascript'], '/teams.css': ['teams.css', 'text/css'], '/profiles.css': ['profiles.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
+    const files = { '/squad-history.js': ['squad-history.js','text/javascript'], '/squads.js': ['squads.js', 'text/javascript'], '/squad-engine.js': ['squad-engine.js','text/javascript'], '/squad-view.js': ['squad-view.js','text/javascript'], '/shared.js': ['shared.js','text/javascript'], '/squads.css': ['squads.css','text/css'], '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/teams.js': ['teams.js', 'text/javascript'], '/teams.css': ['teams.css', 'text/css'], '/profiles.css': ['profiles.css', 'text/css'], '/styles.css': ['styles.css', 'text/css'] };
     if (req.method === 'GET' && files[url.pathname]) {
       const [file, type] = files[url.pathname];
       res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-cache' });

@@ -1,3 +1,4 @@
+import {buildHistory,historyAnalysis} from './public/squad-history.js';
 import { randomBytes } from 'node:crypto';
 import { state } from './teams.mjs';
 import { generate, positions, formations, slotsFor } from './public/squad-engine.js';
@@ -11,16 +12,7 @@ const answer=(status,body)=>({status,body});
 const fail=message=>{throw new Error(message);};
 function analyze(db,teamId) {
   const records=db.prepare('SELECT o.* FROM squad_outcomes o JOIN squads s ON s.id=o.squad_id WHERE s.team_id=?').all(teamId);
-  const groups={formations:new Map(),tactics:new Map(),players:new Map(),combinations:new Map()};
-  function add(group,key,label,outcome,weight=1){let item=group.get(key);if(!item){item={label,win:0,draw:0,loss:0,total:0};group.set(key,item);}item[outcome]+=weight;item.total+=weight;}
-  for(const record of records){const snap=JSON.parse(record.snapshot);
-    add(groups.formations,snap.formation,snap.formation,record.outcome);
-    // Keep tactic wording at the time of the match so edited concepts do not merge silently.
-    const tacticKey=JSON.stringify([snap.tacticId,snap.tacticName,snap.tacticConcept,snap.tacticTraits]);
-    add(groups.tactics,tacticKey,snap.tacticName,record.outcome);
-    for(const p of snap.players)if(p.id!==null){add(groups.players,p.id+':'+p.position,p.name+' · '+p.position,record.outcome,p.weight);add(groups.combinations,JSON.stringify([p.id,p.position,snap.formation,tacticKey]),`${p.name} · ${p.position} · ${snap.formation} · ${snap.tacticName}`,record.outcome,p.weight);}
-  }
-  return {recordedQuarters:records.length,...Object.fromEntries(Object.entries(groups).map(([key,group])=>[key,[...group.values()].map(v=>({...v,winRate:Math.round(v.win/v.total*1000)/10})).sort((a,b)=>b.total-a.total||b.winRate-a.winRate)]))};
+  return historyAnalysis(records);
 }
 function normalize(input,teamState,enabled) {
   const {name,quarters,attendees,guests,mode}=input;
@@ -109,7 +101,8 @@ export function handleSquads(db,route,user,input) {
     if(input.outcome==='clear')db.prepare('DELETE FROM squad_outcomes WHERE squad_id=? AND quarter=?').run(existing.id,qi);
     else {
       const q=result.quarters[qi],people=new Map(config.players.map(p=>[p.key,p]));
-      const snapshot={formation:q.formation,tacticId:config.quarters[qi].tacticId,tacticName:q.tacticName,tacticConcept:config.quarters[qi].tactic?.concept||'',tacticTraits:config.quarters[qi].tactic?.traits||'',players:q.halves.flatMap(half=>half.flatMap((key,i)=>key?[{id:people.get(key).id??null,name:people.get(key).name,position:slotsFor(q.formation)[i].pos,weight:0.5}]:[]))};
+      const lineups=q.halves.map(half=>half.flatMap((key,i)=>key?[{id:people.get(key).id??null,name:people.get(key).name,position:slotsFor(q.formation)[i].pos,weight:0.5}]:[]));
+      const snapshot={formation:q.formation,tacticId:config.quarters[qi].tacticId,tacticName:q.tacticName,tacticConcept:config.quarters[qi].tactic?.concept||'',tacticTraits:config.quarters[qi].tactic?.traits||'',lineups,players:lineups.flat()};
       db.prepare('INSERT INTO squad_outcomes VALUES(?,?,?,?) ON CONFLICT(squad_id,quarter) DO UPDATE SET outcome=excluded.outcome,snapshot=excluded.snapshot').run(existing.id,qi,input.outcome,JSON.stringify(snapshot));
     }
     return answer(200,{outcomes:db.prepare('SELECT quarter,outcome FROM squad_outcomes WHERE squad_id=? ORDER BY quarter').all(existing.id)});
@@ -130,7 +123,9 @@ export function handleSquads(db,route,user,input) {
     let teamState;try{teamState=state(db,user);}finally{db.prepare('UPDATE team_preferences SET team_id=? WHERE user_id=?').run(previous??null,user.id);}
     const config=normalize(input.config,teamState,enabled);
     if(!config.players.length)fail('참석 선수를 한 명 이상 선택해 주세요.');
-    const result=route.endsWith('/generate')?generate(config.players,config.quarters,config.mode,teamState.customFields,teamState.basicFields):input.result?validResult(input.result,config):null;
+    const records=db.prepare('SELECT o.* FROM squad_outcomes o JOIN squads s ON s.id=o.squad_id WHERE s.team_id=?').all(team.id);
+    const history=buildHistory(records);
+    const result=route.endsWith('/generate')?generate(config.players,config.quarters,config.mode,teamState.customFields,teamState.basicFields,history.recordedQuarters?history:null):input.result?validResult(input.result,config):null;
     let id=existing?.id;
     if(id)db.prepare('UPDATE squads SET name=?,config=?,result=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(config.name,JSON.stringify(config),result?JSON.stringify(result):null,id);
     else id=Number(db.prepare('INSERT INTO squads(team_id,name,config,result) VALUES(?,?,?,?)').run(team.id,config.name,JSON.stringify(config),result?JSON.stringify(result):null).lastInsertRowid);

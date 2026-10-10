@@ -45,7 +45,10 @@ test('Cloudflare API preserves legacy login and supports profiles, squads, resul
     assert.equal(generated.body.result.quarters.length,2);
     assert.equal((await call('/api/squads/outcomes',{teamId,squadId,outcomes:['win','bad']})).status,400);
     assert.equal((await call('/api/squads/load',{teamId,squadId})).body.outcomes.length,0);
+    const savedLayout=sqlite.prepare('SELECT config,result FROM squads WHERE id=?').get(squadId);
     assert.equal((await call('/api/squads/outcomes',{teamId,squadId,outcomes:['win','loss']})).status,200);
+    assert.deepEqual(sqlite.prepare('SELECT config,result FROM squads WHERE id=?').get(squadId),savedLayout);
+    assert.equal(JSON.parse(sqlite.prepare('SELECT snapshot FROM squad_outcomes WHERE squad_id=? LIMIT 1').get(squadId).snapshot).lineups.length,2);
     assert.equal((await call('/api/squads/analysis',{teamId})).body.recordedQuarters,2);
     assert.equal((await call('/api/squads/generate',{teamId,squadId,config})).status,400);
     const shared=await call('/api/squads/share',{teamId,squadId});assert.equal(shared.status,200);
@@ -56,6 +59,8 @@ test('Cloudflare API preserves legacy login and supports profiles, squads, resul
     const accepted=await call('/api/teams/transfer/respond',{transferId:incoming[0].id,decision:'accept'},'b');assert.equal(accepted.status,200);assert.equal(accepted.body.players[0].comment,'');
     assert.equal((await call('/api/squads/load',{teamId,squadId},'a')).status,404);
     const moved=await call('/api/squads/load',{teamId,squadId},'b');assert.equal(moved.body.config.players[0].comment,'');
+    const learned=await call('/api/squads/generate',{teamId,config:{...config,mode:'fair',name:'History supported'}},'b');assert.equal(learned.status,200);
+    assert.ok(learned.body.result.quarters[0].reason.includes('과거 승률'));
   }finally{sqlite.close();}
 });
 test('D1 atomic batches roll back and reject stale concurrent ownership changes',async()=>{
