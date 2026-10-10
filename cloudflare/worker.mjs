@@ -106,7 +106,7 @@ export default {
         else if(path==='/api/teams/state')result=await handleTeams(db,path,await userFor(db,request),{});
         else if(path.startsWith('/api/shared/'))result=await sharedSquad(db,path.slice('/api/shared/'.length));
         else return json(404,{error:'찾을 수 없는 요청입니다.'});
-        await db.verify();return json(result.status,result.body);
+        await db.verify();return await domainResponse(db,request,result);
       }
       return json(405,{error:'허용되지 않은 요청입니다.'});
     }catch(error){
