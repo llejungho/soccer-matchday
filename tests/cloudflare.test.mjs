@@ -50,6 +50,10 @@ test('Cloudflare API preserves legacy login and supports profiles, squads, resul
     assert.equal((await call('/api/squads/save',{teamId,squadId:availabilityPlan.body.id,config:availabilityConfig,result:unavailableEdit})).status,400);
     const generated=await call('/api/squads/generate',{teamId,config});assert.equal(generated.status,200,JSON.stringify(generated.body));const squadId=generated.body.id;
     assert.equal(generated.body.result.quarters.length,2);
+    const designated=structuredClone(generated.body.result),pick=designated.quarters[0].halves.flat().find(Boolean);
+    designated.quarters[0].setPieces={corner:[pick,null],freeKick:[null,null],penalty:[pick]};
+    assert.equal((await call('/api/squads/save',{teamId,squadId,config,result:designated})).status,200);
+    assert.deepEqual((await call('/api/squads/load',{teamId,squadId})).body.result.quarters[0].setPieces.penalty,[pick]);
     assert.equal((await call('/api/squads/outcomes',{teamId,squadId,outcomes:['win','bad']})).status,400);
     assert.equal((await call('/api/squads/load',{teamId,squadId})).body.outcomes.length,0);
     const savedLayout=sqlite.prepare('SELECT config,result FROM squads WHERE id=?').get(squadId);

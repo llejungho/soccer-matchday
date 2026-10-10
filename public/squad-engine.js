@@ -58,6 +58,7 @@ export function tacticWeights(tactic,fields=defaultBasicFields.map(f=>({...f,bas
 }
 function quality(player,slot,tactic,fields,history,q) {
   let score=preference(player,slot.pos)*10;
+  if(!tactic)return score;
   for(const field of fields){const name=field.name.replace(/\s/g,'');if(/^(전체실력|종합실력|기량)$/.test(name)||(family(slot.pos)==='attack'&&name==='공격력')||(family(slot.pos)==='defense'&&name==='수비력'))score+=readScore(player,field)*2;}
   const weights=tacticWeights(tactic,fields);for(const field of fields)score+=readScore(player,field)*(weights[scoreKey(field)]||0)*5;
   const text=`${tactic?.name||''} ${tactic?.concept||''} ${tactic?.traits||''}`;
@@ -109,7 +110,7 @@ function optimizePairs(result,players,quarters,fields,history) {
   const byKey=new Map(players.map(p=>[p.key,p]));
   const qualities=quarters.map(q=>new Map(players.flatMap(p=>slotsFor(q.formation).map(s=>[p.key+':'+s.pos,quality(p,s,q.tactic,fields,history,q)]))));
   const pairCache=new Map();
-  function value(keys,qi) {const q=quarters[qi],slots=slotsFor(q.formation);let score=0;keys.forEach((key,i)=>{if(key)score+=qualities[qi].get(key+':'+slots[i].pos);for(let j=0;j<i;j++){const cacheKey=JSON.stringify([qi,key,keys[j],i,j]);if(!pairCache.has(cacheKey))pairCache.set(cacheKey,pairScore(byKey.get(key),byKey.get(keys[j]),slots[i],slots[j])+historyPairScore(history,byKey.get(key),byKey.get(keys[j]),q));score+=pairCache.get(cacheKey);}});return score+historyLineupScore(history,keys.map(key=>byKey.get(key)),slots,q);}
+  function value(keys,qi) {const q=quarters[qi],slots=slotsFor(q.formation);let score=0;keys.forEach((key,i)=>{if(key)score+=qualities[qi].get(key+':'+slots[i].pos);for(let j=0;j<i;j++){const cacheKey=JSON.stringify([qi,key,keys[j],i,j]);if(!pairCache.has(cacheKey))pairCache.set(cacheKey,pairScore(byKey.get(key),byKey.get(keys[j]),slots[i],slots[j])+historyPairScore(history,byKey.get(key),byKey.get(keys[j]),q));if(q.tactic)score+=pairCache.get(cacheKey);}});return score+(q.tactic?historyLineupScore(history,keys.map(key=>byKey.get(key)),slots,q):0);}
   const all=result.flatMap((q,qi)=>(qi<2?[0]:[0,1]).map(half=>({keys:q.halves[half],qi,half,weight:qi<2?2:1})));
   for(let pass=0;pass<3;pass++) {let improved=false;
     for(let ai=0;ai<all.length;ai++) for(let bi=ai;bi<all.length;bi++) {
@@ -165,7 +166,7 @@ export function generate(players,quarters,mode,fields=[],basicFields=defaultBasi
     const weights=tacticWeights(quarters[qi].tactic,fields);
     const labels=fields.filter(f=>weights[scoreKey(f)]).map(f=>f.name);
     let preferred=0,count=0;for(const keys of q.halves)keys.forEach((key,i)=>{if(key){count++;if(players.find(p=>p.key===key).positions[0]===slotsFor(q.formation)[i].pos)preferred++;}});
-    q.reason=`${q.tacticName}: ${labels.length?labels.join('·')+' 평가를 반영하고 ':''}1순위 포지션 ${preferred}/${count}개 반쿼터 자리에 배치했습니다. 참석 가능한 쿼터·선호 순위·출전량·특징·궁합을 함께 고려했습니다. ${qi<2?'전·후반 동일한 풀쿼터 배치입니다. ':''}`+historyReason(history,q.halves[0],players,{...quarters[qi],slots:slotsFor(q.formation)});
+    q.reason=`${q.tacticName}: ${labels.length?labels.join('·')+' 평가를 반영하고 ':''}1순위 포지션 ${preferred}/${count}개 반쿼터 자리에 배치했습니다. ${quarters[qi].tactic?'참석 가능한 쿼터·선호 순위·출전량·특징·궁합을 함께 고려했습니다.':'참석 가능한 쿼터·선호 순위·출전량을 고려했습니다.'} ${qi<2?'전·후반 동일한 풀쿼터 배치입니다. ':''}`+(quarters[qi].tactic?historyReason(history,q.halves[0],players,{...quarters[qi],slots:slotsFor(q.formation)}):'기본 컨셉은 평가 점수와 과거 승률 가중치를 적용하지 않고 참석 가능 시간과 출전량, 선호 포지션에 맞춰 배분합니다.');
   }
   const fieldTargets=players.flatMap((p,i)=>p.keeper?[]:[targets[i]/2]);
   if(mode==='fair'&&fieldTargets.length&&Math.max(...fieldTargets)-Math.min(...fieldTargets)>0.5)warnings.push('참석 가능한 쿼터와 1·2쿼터 풀쿼터 조건에 따라 출전량에 차이가 생길 수 있습니다. 최종 출전량을 확인하세요.');

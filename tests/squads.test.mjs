@@ -44,8 +44,12 @@ test('squad ownership, persistence, manual validation and sanitized share snapsh
     assert.equal(call('load',{squadId:id},2).status,404);
     const invalid=structuredClone(saved.body.result);invalid.quarters[0].halves[0][1]='p:1';invalid.quarters[0].halves[0][0]='p:1';
     assert.equal(call('save',{squadId:id,config,result:invalid}).status,400);
+    saved.body.result.quarters[0].setPieces={corner:['p:1',null],freeKick:['g:test',null],penalty:['p:1']};
+    assert.equal(call('save',{squadId:id,config,result:saved.body.result}).status,200);
+    assert.deepEqual(call('load',{squadId:id}).body.result.quarters[0].setPieces.penalty,['p:1']);
     const shared=call('share',{squadId:id});const token=shared.body.path.split('/').pop();const publicData=sharedSquad(db,token);
     assert.equal(publicData.status,200);assert.equal(publicData.body.quarters[0].halves[0][10],'용병');
+    assert.deepEqual(publicData.body.quarters[0].setPieces.penalty,['우리선수']);
     assert.ok(!JSON.stringify(publicData.body).includes('ratings'));assert.ok(!JSON.stringify(publicData.body).includes('comment'));assert.ok(!JSON.stringify(publicData.body).includes('chemistry'));
     call('save',{squadId:id,config:{...config,name:'변경'},result:saved.body.result});assert.equal(sharedSquad(db,token).body.name,'정기경기');
     call('unshare',{squadId:id});assert.equal(sharedSquad(db,token).status,404);

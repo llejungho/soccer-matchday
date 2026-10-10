@@ -26,6 +26,7 @@ async function fetchJson(fetcher,url,options){
 }
 export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
   const url=new URL(request.url),path=url.pathname;
+  if(path==='/api/social/share-config')return answer(200,{javascriptKey:env.KAKAO_JAVASCRIPT_KEY?.trim()||''});
   if(path==='/api/social/providers')return answer(200,{providers:providerStatus(env)});
   const start=/^\/api\/social\/start\/(naver|kakao|google)$/.exec(path),callback=/^\/api\/social\/callback\/(naver|kakao|google)$/.exec(path);
   const productionHost='soccer-matchday-b16.pages.dev';

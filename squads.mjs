@@ -1,3 +1,4 @@
+import {validateSetPieces,namedSetPieces} from './public/squad-set-pieces.js';
 import {buildHistory,historyAnalysis} from './public/squad-history.js';
 import { randomBytes } from 'node:crypto';
 import { state } from './teams.mjs';
@@ -20,9 +21,9 @@ function normalize(input,teamState,enabled) {
   if(!Array.isArray(quarters)||quarters.length<1||quarters.length>12)fail('쿼터는 1~12개로 설정해 주세요.');
   const normalizedQuarters=quarters.map(q=>{
     if(!q||!enabled.includes(q.formation))fail('팀에서 사용하는 포메이션을 선택해 주세요.');
-    const tactic=q.tacticId===null?null:teamState.tactics.find(t=>t.id===q.tacticId);
-    if(q.tacticId!==null&&!tactic)fail('현재 팀의 전술을 선택해 주세요. 삭제된 전술이 있다면 다시 선택하세요.');
-    return {formation:q.formation,tacticId:q.tacticId,tactic};
+    const tacticId=q.tacticId??null,tactic=tacticId===null?null:teamState.tactics.find(t=>t.id===tacticId);
+    if(tacticId!==null&&!tactic)fail('현재 팀의 전술을 선택해 주세요. 삭제된 전술이 있다면 다시 선택하세요.');
+    return {formation:q.formation,tacticId,tactic};
   });
   if(!['fair','individual'].includes(mode))fail('배분 방식을 선택해 주세요.');
   if(!Array.isArray(attendees)||!Array.isArray(guests)||attendees.length+guests.length>100)fail('참석자는 최대 100명입니다.');
@@ -50,13 +51,13 @@ function validResult(result,config) {
     const halves=q.halves.map(half=>{
       if(!Array.isArray(half)||half.length!==11||half.some(k=>k!==null&&!keys.has(k))||new Set(half.filter(Boolean)).size!==half.filter(Boolean).length)fail('같은 전·후반에 한 선수를 중복 배치할 수 없습니다.');if(half.some(k=>k&&!normalizeAvailability(config.players.find(p=>p.key===k),config.quarters.length).includes(i)))fail('참석 불가능한 쿼터에는 선수를 배치할 수 없습니다.');return half;
     });
-    return {formation:config.quarters[i].formation,tacticName:config.quarters[i].tactic?.name||'기본 컨셉',halves,reason:typeof q.reason==='string' ? q.reason.slice(0,1000) : '감독이 직접 수정한 배치입니다. 출전량과 포지션을 최종 확인해 주세요.'};
+    return {formation:config.quarters[i].formation,tacticName:config.quarters[i].tactic?.name||'기본 컨셉',halves,setPieces:validateSetPieces(q),reason:typeof q.reason==='string' ? q.reason.slice(0,1000) : '감독이 직접 수정한 배치입니다. 출전량과 포지션을 최종 확인해 주세요.'};
   })};
 }
 function publicSnapshot(squad) {
   const config=JSON.parse(squad.config),result=JSON.parse(squad.result);
   const people=Object.fromEntries(config.players.map(p=>[p.key,p.name]));
-  return {name:squad.name,quarters:result.quarters.map((q,i)=>({formation:q.formation,tacticName:q.tacticName,slots:slotsFor(q.formation),halves:q.halves.map(half=>half.map(key=>key?people[key]:null))}))};
+  return {name:squad.name,quarters:result.quarters.map((q,i)=>({formation:q.formation,tacticName:q.tacticName,slots:slotsFor(q.formation),halves:q.halves.map(half=>half.map(key=>key?people[key]:null)),setPieces:namedSetPieces(q,people)}))};
 }
 export function sharedSquad(db,token) {
   if(!/^[a-f0-9]{48}$/.test(token))return answer(404,{error:'공유가 종료되었거나 없는 스쿼드입니다.'});
