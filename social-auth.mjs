@@ -16,7 +16,13 @@ export const providerStatus=env=>Object.entries(providers).map(([id,p])=>({id,na
 const cookieValue=(request,name)=>new RegExp('(?:^|;\\s*)'+name+'=([a-f0-9]{64})(?:;|$)').exec(request.headers.get('cookie')||'')?.[1];
 const setCookie=(request,name,value,maxAge)=>`${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${new URL(request.url).protocol==='https:'?'; Secure':''}`;
 const answer=(status,body,headers={})=>({status,body,headers});
-async function fetchJson(fetcher,url,options){const response=await fetcher(url,{...options,signal:AbortSignal.timeout(15000),redirect:'error'});if(!response.ok)throw new Error('SNS 인증을 완료하지 못했습니다. 다시 시도해 주세요.');return await response.json();}
+async function fetchJson(fetcher,url,options){
+  // workerd supports manual/follow only. Never follow provider redirects:
+  // a redirected request could forward the client secret or access token.
+  const response=await fetcher(url,{...options,signal:AbortSignal.timeout(15000),redirect:'manual'});
+  if(!response.ok)throw new Error('SNS 인증을 완료하지 못했습니다. 다시 시도해 주세요.');
+  return await response.json();
+}
 export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
   const url=new URL(request.url),path=url.pathname;
   if(path==='/api/social/providers')return answer(200,{providers:providerStatus(env)});
