@@ -9,3 +9,5 @@ backups/
 *.sqlite-shm
 *.png
 *.log
+dist/
+.wrangler/
