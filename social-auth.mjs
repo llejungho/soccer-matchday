@@ -66,12 +66,24 @@ export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
     const pending=random();await db.transaction(async()=>{await db.prepare('DELETE FROM oauth_pending WHERE expires_at<=?').run(Date.now());await db.prepare('INSERT INTO oauth_pending VALUES(?,?,?,?,?)').run(hash(pending),id,String(subject),email,Date.now()+600000);});
     return answer(302,null,{Location:'/?social=complete','Set-Cookie':setCookie(request,'oauth_pending',pending,600)});
   }
+  const savedToken=cookieValue(request,'oauth_link_pending');
+  const saved=savedToken?await db.prepare('SELECT * FROM oauth_pending WHERE token_hash=? AND expires_at>?').get(hash(savedToken),Date.now()):null;
+  if(path==='/api/social/resume'){
+    if(!saved||!user||user.email!==saved.email)return answer(401,{error:'기존 계정 본인 확인이 완료되지 않았거나 연동 요청이 만료되었습니다.'});
+    return answer(200,{ok:true},{'Set-Cookie':setCookie(request,'oauth_pending',savedToken,600)});
+  }
   const pendingToken=cookieValue(request,'oauth_pending');const pending=pendingToken?await db.prepare('SELECT * FROM oauth_pending WHERE token_hash=? AND expires_at>?').get(hash(pendingToken),Date.now()):null;
   if(!pending)return answer(400,{error:'SNS 인증이 만료되었습니다. 다시 로그인하세요.'});
   const identity=await db.prepare('SELECT u.* FROM social_identities s JOIN users u ON u.id=s.user_id WHERE s.provider=? AND s.subject=?').get(pending.provider,pending.subject);
   const existing=await db.prepare('SELECT * FROM users WHERE email=?').get(pending.email);
   if((identity&&identity.status!=='active')||(existing&&existing.status!=='active'))return answer(403,{error:'이용이 제한되었거나 탈퇴한 계정입니다.'});
-  if(path==='/api/social/pending')return answer(200,{provider:pending.provider,name:providers[pending.provider].name,email:pending.email,kind:identity?'login':existing?'link':'signup',needsPassword:!!existing?.password_hash,canLink:!!user&&user.id===existing?.id});
+  const linked=existing?await db.prepare('SELECT provider FROM social_identities WHERE user_id=?').all(existing.id):[];
+  const verifyWith=linked.filter(row=>row.provider!==pending.provider&&providerStatus(env).some(p=>p.id===row.provider&&p.enabled)).map(row=>({id:row.provider,name:providers[row.provider].name}));
+  if(path==='/api/social/pending')return answer(200,{provider:pending.provider,name:providers[pending.provider].name,email:pending.email,kind:identity?'login':existing?'link':'signup',needsPassword:!!existing?.password_hash,canLink:!!user&&user.id===existing?.id,verifyWith});
+  if(path==='/api/social/verify'){
+    if(identity||!existing||!verifyWith.some(p=>p.id===input.provider))return answer(400,{error:'기존 계정에 연결된 SNS를 선택해 주세요.'});
+    return answer(200,{url:'/api/social/start/'+input.provider},{'Set-Cookie':setCookie(request,'oauth_link_pending',pendingToken,600)});
+  }
   if(path==='/api/social/cancel'){await db.prepare('DELETE FROM oauth_pending WHERE token_hash=?').run(pending.token_hash);return answer(200,{ok:true},{'Set-Cookie':setCookie(request,'oauth_pending','',0)});}
   if(path!=='/api/social/finish')return answer(404,{error:'찾을 수 없는 요청입니다.'});
   let account=identity;
@@ -88,5 +100,5 @@ export async function handleSocial(db,request,env,user,input={},fetcher=fetch){
     await db.transaction(async()=>{await db.prepare('INSERT INTO users(email,password_hash,salt,nickname,nickname_key) VALUES(?,?,?,?,?)').run(pending.email,'','',nickname,nicknameKey(nickname));await db.prepare('INSERT INTO social_identities(provider,subject,user_id) SELECT ?,?,id FROM users WHERE email=?').run(pending.provider,pending.subject,pending.email);await db.prepare('DELETE FROM oauth_pending WHERE token_hash=?').run(pending.token_hash);});
     account=await db.prepare('SELECT id,email,nickname FROM users WHERE email=?').get(pending.email);
   }else await db.transaction(async()=>{if(!identity)await db.prepare('INSERT INTO social_identities VALUES(?,?,?)').run(pending.provider,pending.subject,account.id);await db.prepare('DELETE FROM oauth_pending WHERE token_hash=?').run(pending.token_hash);});
-  return answer(200,{user:publicUser(account),signInUser:account.id},{'Set-Cookie':setCookie(request,'oauth_pending','',0)});
+  return answer(200,{user:publicUser(account),signInUser:account.id,resumeLink:!!saved&&saved.email===account.email&&savedToken!==pendingToken},{'Set-Cookie':setCookie(request,'oauth_pending','',0)});
 }

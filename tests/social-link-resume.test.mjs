@@ -1,0 +1,41 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {handleSocial} from '../social-auth.mjs';
+import {asyncDatabase} from '../local-database.mjs';
+import {Database} from '../cloudflare/database.mjs';
+import {migratedDatabase,bindingFor} from './helper-database.mjs';
+const hash=v=>createHash('sha256').update(v).digest('hex');
+for(const runtime of ['SQLite','D1'])test(runtime+' resumes SNS linking only after authenticating the existing account',async()=>{
+  const sqlite=migratedDatabase(),env={NAVER_CLIENT_ID:'n',NAVER_CLIENT_SECRET:'ns',KAKAO_CLIENT_ID:'k',KAKAO_CLIENT_SECRET:'ks'};
+  const target='a'.repeat(64),proof='b'.repeat(64),wrong='c'.repeat(64);
+  const request=(route,cookie)=>new Request('https://test.pages.dev/api/social/'+route,{headers:{cookie}});
+  const call=async(route,cookie,user=null,input={})=>handleSocial(runtime==='SQLite'?asyncDatabase(sqlite):await new Database(bindingFor(sqlite)).start(),request(route,cookie),env,user,input);
+  try{
+    sqlite.prepare('INSERT INTO users(id,email,nickname,nickname_key,password_hash,salt) VALUES(?,?,?,?,?,?)').run(1,'same@test.com','회원','회원','','');
+    sqlite.prepare('INSERT INTO users(id,email,nickname,nickname_key,password_hash,salt) VALUES(?,?,?,?,?,?)').run(2,'other@test.com','다른회원','다른회원','','');
+    sqlite.prepare('INSERT INTO social_identities VALUES(?,?,?)').run('kakao','original',1);
+    sqlite.prepare('INSERT INTO social_identities VALUES(?,?,?)').run('kakao','someone-else',2);
+    const insert=(token,provider,subject,email)=>sqlite.prepare('INSERT INTO oauth_pending VALUES(?,?,?,?,?)').run(hash(token),provider,subject,email,Date.now()+600000);
+    insert(target,'naver','new-naver','same@test.com');insert(proof,'kakao','original','same@test.com');insert(wrong,'kakao','someone-else','other@test.com');
+    const original='oauth_pending='+target;
+    assert.deepEqual((await call('pending',original)).body.verifyWith,[{id:'kakao',name:'카카오'}]);
+    assert.equal((await call('finish',original,null,{action:'link'})).status,401);
+    assert.equal((await call('verify',original,null,{provider:'google'})).status,400);
+    const verification=await call('verify',original,null,{provider:'kakao'});assert.equal(verification.body.url,'/api/social/start/kakao');
+    const saved=verification.headers['Set-Cookie'].split(';')[0];
+    assert.equal((await call('resume',saved)).status,401);
+    const other=sqlite.prepare('SELECT * FROM users WHERE id=2').get();
+    assert.equal((await call('resume',saved,other)).status,401);
+    const incorrect=await call('finish','oauth_pending='+wrong+'; '+saved,null,{action:'login'});assert.equal(incorrect.body.resumeLink,false);
+    const verified=await call('finish','oauth_pending='+proof+'; '+saved,null,{action:'login'});assert.equal(verified.body.signInUser,1);assert.equal(verified.body.resumeLink,true);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM social_identities').get().n,2);
+    const user=sqlite.prepare('SELECT * FROM users WHERE id=1').get();
+    const resumed=await call('resume',saved,user);assert.equal(resumed.status,200);assert.ok(resumed.headers['Set-Cookie'].startsWith(original+';'));
+    assert.equal((await call('pending',original,user)).body.canLink,true);
+    const linked=await call('finish',original+'; '+saved,user,{action:'link'});assert.equal(linked.status,200);assert.equal(linked.body.resumeLink,false);
+    assert.equal(sqlite.prepare('SELECT user_id FROM social_identities WHERE provider=? AND subject=?').get('naver','new-naver').user_id,1);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM users').get().n,2);
+    assert.equal((await call('resume',saved,user)).status,401);
+  }finally{sqlite.close();}
+});
