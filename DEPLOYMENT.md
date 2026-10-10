@@ -78,4 +78,3 @@ docker compose up -d --build
 
 SQLite와 볼륨은 한 서버의 한 앱 인스턴스를 기준으로 합니다. 여러 서버로 늘릴 때는 공유 데이터베이스와 중앙 요청 제한을 도입해야 합니다. 현재 로그인 요청 제한은 Caddy가 덮어쓴 실제 IP 헤더를 사용하며 앱 포트를 외부에 노출하지 않는 구성을 전제로 합니다.
 Cloudflare Pages + D1을 사용하려면 [CLOUDFLARE.md](CLOUDFLARE.md)를 참고하세요. 아래 내용은 별도 서버에서 Docker와 SQLite로 운영하는 방법입니다.
-

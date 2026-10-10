@@ -1,20 +1,3 @@
-export async function initializeTeams(db) {
-  (await db.exec(`PRAGMA foreign_keys=ON;
-    CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id), name TEXT NOT NULL, color TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-    CREATE TABLE IF NOT EXISTS players(id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL REFERENCES teams(id), name TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS player_profiles(player_id INTEGER PRIMARY KEY REFERENCES players(id), positions TEXT NOT NULL DEFAULT '[]', stamina INTEGER CHECK(stamina BETWEEN 1 AND 5), aggression INTEGER CHECK(aggression BETWEEN 1 AND 5), attack INTEGER CHECK(attack BETWEEN 1 AND 5), defense INTEGER CHECK(defense BETWEEN 1 AND 5), overall INTEGER CHECK(overall BETWEEN 1 AND 5));
-    CREATE TABLE IF NOT EXISTS team_preferences(user_id INTEGER PRIMARY KEY REFERENCES users(id), team_id INTEGER REFERENCES teams(id));
-    CREATE TABLE IF NOT EXISTS team_transfers(id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL REFERENCES teams(id), sender_id INTEGER NOT NULL REFERENCES users(id), recipient_id INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-    CREATE UNIQUE INDEX IF NOT EXISTS one_pending_transfer ON team_transfers(team_id) WHERE status='pending';`));
-  if (!(await db.prepare('PRAGMA table_info(player_profiles)').all()).some(column => column.name === 'comment')) (await db.exec("ALTER TABLE player_profiles ADD COLUMN comment TEXT NOT NULL DEFAULT ''"));
-  (await db.exec(`CREATE TABLE IF NOT EXISTS player_chemistry(
-    player_a INTEGER NOT NULL REFERENCES players(id), player_b INTEGER NOT NULL REFERENCES players(id),
-    kind TEXT NOT NULL CHECK(kind IN ('good','bad')), PRIMARY KEY(player_a,player_b), CHECK(player_a < player_b));
-    CREATE TABLE IF NOT EXISTS team_tactics(id INTEGER PRIMARY KEY AUTOINCREMENT, team_id INTEGER NOT NULL REFERENCES teams(id), name TEXT NOT NULL, concept TEXT NOT NULL, traits TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS team_rating_fields(id INTEGER PRIMARY KEY AUTOINCREMENT, team_id INTEGER NOT NULL REFERENCES teams(id), name TEXT NOT NULL, UNIQUE(team_id,name));
-    CREATE TABLE IF NOT EXISTS player_custom_ratings(player_id INTEGER NOT NULL REFERENCES players(id), field_id INTEGER NOT NULL REFERENCES team_rating_fields(id) ON DELETE CASCADE, score INTEGER NOT NULL CHECK(score BETWEEN 1 AND 5), PRIMARY KEY(player_id,field_id));`));
-  (await db.exec(`CREATE TABLE IF NOT EXISTS team_basic_rating_fields(team_id INTEGER NOT NULL REFERENCES teams(id),key TEXT NOT NULL,name TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(team_id,key));`));
-}
 const positionsAllowed = ['CF', 'SS', 'LW', 'RW', 'AM', 'LM', 'CM', 'RM', 'DM', 'LWB', 'RWB', 'CB', 'GK'];
 const ratingKeys = ['stamina', 'aggression', 'attack', 'defense', 'overall'];
 const defaultRatings = {stamina:'체력',aggression:'적극성',attack:'공격력',defense:'수비력',overall:'전체 실력'};

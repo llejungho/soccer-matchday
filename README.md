@@ -79,4 +79,3 @@ npm test
 # Cloudflare 홈페이지 배포
 
 Cloudflare Pages + D1 배포는 [CLOUDFLARE.md](CLOUDFLARE.md)를 참고하세요. `npm run build`로 HTML과 API Worker를 함께 빌드합니다. 회원·팀 데이터는 D1에 저장하며 DB 파일을 GitHub에 공개하지 않습니다.
-

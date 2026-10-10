@@ -9,6 +9,10 @@ const endpoint='https://api.cloudflare.com/client/v4/accounts/e9cd400aa7d2e03a43
 const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'};
 const response=await fetch(endpoint,{headers});const existing=await response.json();if(!existing.success)throw new Error(JSON.stringify(existing.errors));
 console.log(JSON.stringify({buildCommand:existing.result.build_config.build_command,output:existing.result.build_config.destination_dir,productionBranch:existing.result.production_branch,domains:existing.result.domains}));
+if(process.argv.includes('--status')){
+  const response=await fetch(endpoint+'/deployments',{headers});const deployments=await response.json();if(!deployments.success)throw new Error(JSON.stringify(deployments.errors));
+  console.log(JSON.stringify(deployments.result.slice(0,3).map(item=>({id:item.id,url:item.url,commit:item.deployment_trigger?.metadata?.commit_hash,status:item.latest_stage?.status,stage:item.latest_stage?.name}))));
+}
 if(process.argv.includes('--apply')){
   const update={
     build_config:{...existing.result.build_config,build_command:'npm run build',destination_dir:'dist',root_dir:''},

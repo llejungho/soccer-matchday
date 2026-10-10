@@ -1,12 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { state } from './teams.mjs';
 import { generate, positions, formations, slotsFor } from '../public/squad-engine.js';
-export async function initializeSquads(db) {
-  (await db.exec(`CREATE TABLE IF NOT EXISTS squads(id INTEGER PRIMARY KEY AUTOINCREMENT,team_id INTEGER NOT NULL REFERENCES teams(id),name TEXT NOT NULL,config TEXT NOT NULL,result TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-    CREATE TABLE IF NOT EXISTS squad_shares(token TEXT PRIMARY KEY,squad_id INTEGER NOT NULL REFERENCES squads(id) ON DELETE CASCADE,snapshot TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS team_formations(team_id INTEGER PRIMARY KEY REFERENCES teams(id),codes TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS squad_outcomes(squad_id INTEGER NOT NULL REFERENCES squads(id),quarter INTEGER NOT NULL,outcome TEXT NOT NULL,snapshot TEXT NOT NULL,PRIMARY KEY(squad_id,quarter));`));
-}
 const answer=(status,body)=>({status,body});
 const fail=message=>{throw new Error(message);};
 async function analyze(db,teamId) {
