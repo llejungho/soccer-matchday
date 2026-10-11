@@ -74,7 +74,9 @@ export default {
     try{
       if(!path.startsWith('/api/')){
         if(!['GET','HEAD'].includes(request.method))return json(405,{error:'허용되지 않은 요청입니다.'});
-        const assetUrl=new URL(request.url);if(path.startsWith('/share/'))assetUrl.pathname='/shared.html';
+        // Pages redirects .html assets to their extensionless URL. Request the
+        // canonical asset internally so /share/<token> stays in the browser.
+        const assetUrl=new URL(request.url);if(path.startsWith('/share/'))assetUrl.pathname='/shared';
         const response=await env.ASSETS.fetch(new Request(assetUrl,request));
         const result=new Response(response.body,response);
         for(const [key,value] of Object.entries(headers))result.headers.set(key,value);
