@@ -26,7 +26,7 @@ export async function handleRecovery(db,request,env,input={},fetcher=fetch,gmail
       if(account){
         const token=await issueResetGrant(db,account,challenge+code,600000);
         try{await gmailSender(env,email,code);}
-        catch{await db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));return reply(503,{error:'인증코드를 보내지 못했습니다. 잠시 후 다시 시도하세요.'});}
+        catch(error){console.warn('Gmail delivery failure',/^Gmail SMTP [A-Za-z ()0-9]+$/.test(error.message||'')?error.message:'mail transport error');await db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));return reply(503,{error:'인증코드를 보내지 못했습니다. 잠시 후 다시 시도하세요.'});}
       }
       return reply(200,{ok:true,emailMode:'code',message:'등록된 계정이면 인증코드를 보냈습니다. 스팸함도 확인하세요. 코드는 10분 동안 유효합니다.'},{'Set-Cookie':`recovery_challenge=${challenge}; HttpOnly; SameSite=Strict; Path=/; Max-Age=600${new URL(request.url).protocol==='https:'?'; Secure':''}`});
     }
