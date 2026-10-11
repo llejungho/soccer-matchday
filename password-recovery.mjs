@@ -17,16 +17,31 @@ export async function handleRecovery(db,request,env,input={},fetcher=fetch,gmail
     const email=typeof input.email==='string'?input.email.trim().toLowerCase():'';
     if(email.length>254||!/^\S+@\S+\.\S+$/.test(email))return reply(400,{error:'등록한 이메일 주소를 입력하세요.'});
     if(!enabled)return reply(503,{error:'이메일 발송 서비스 연결 전입니다. 계정에 연동한 SNS로 본인 확인을 이용하세요.'});
-    const now=Date.now(),keys=['ip:'+hash(request.headers.get('cf-connecting-ip')||'local'),'email:'+hash(email)];
-    for(const key of keys){const previous=await db.prepare('SELECT count,until FROM recovery_attempts WHERE key=?').get(key);if(previous?.until>now&&previous.count>=5)return reply(429,{error:'요청이 많습니다. 15분 후 다시 시도하세요.'});}
-    await db.transaction(async()=>{await db.prepare('DELETE FROM recovery_attempts WHERE until<=?').run(now);for(const key of keys)await db.prepare('INSERT INTO recovery_attempts VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1').run(key,now+900000);});
+    const now=Date.now(),windowMs=600000;
+    const limits=[{key:'send-v2:ip:'+hash(request.headers.get('cf-connecting-ip')||'local'),maximum:100},{key:'send-v2:email:'+hash(email),maximum:10}];
+    let retryAfterSeconds=0;
+    for(const limit of limits){
+      const previous=await db.prepare('SELECT count,until FROM recovery_attempts WHERE key=?').get(limit.key);
+      limit.until=previous?.until>now?previous.until:now+windowMs;
+      if(previous?.until>now&&previous.count>=limit.maximum)retryAfterSeconds=Math.max(retryAfterSeconds,Math.ceil((previous.until-now)/1000));
+    }
+    if(retryAfterSeconds){
+      const minutes=Math.floor(retryAfterSeconds/60),seconds=retryAfterSeconds%60;
+      const wait=[minutes?minutes+'분':'',seconds?seconds+'초':''].filter(Boolean).join(' ');
+      return reply(429,{error:`인증코드 요청 횟수를 초과했습니다. ${wait} 후 다시 시도하세요.`,retryAfterSeconds},{'Retry-After':String(retryAfterSeconds)});
+    }
+    await db.transaction(async()=>{await db.prepare('DELETE FROM recovery_attempts WHERE until<=?').run(now);for(const limit of limits)await db.prepare('INSERT INTO recovery_attempts VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1').run(limit.key,limit.until);});
+    const undoFailedDelivery=async token=>db.transaction(async()=>{
+      await db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));
+      for(const limit of limits)await db.prepare('UPDATE recovery_attempts SET count=MAX(0,count-1) WHERE key=? AND until=?').run(limit.key,limit.until);
+    });
     const account=await db.prepare("SELECT * FROM users WHERE email=? AND status='active'").get(email);
     if(useGmail){
       const challenge=randomBytes(32).toString('hex'),code=String(randomInt(1000000)).padStart(6,'0');
       if(account){
         const token=await issueResetGrant(db,account,challenge+code,600000);
         try{await gmailSender(env,email,code);}
-        catch(error){console.warn('Gmail delivery failure',/^Gmail SMTP [A-Za-z ()0-9]+$/.test(error.message||'')?error.message:'mail transport error');await db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));return reply(503,{error:'인증코드를 보내지 못했습니다. 잠시 후 다시 시도하세요.'});}
+        catch(error){console.warn('Gmail delivery failure',/^Gmail SMTP [A-Za-z ()0-9]+$/.test(error.message||'')?error.message:'mail transport error');await undoFailedDelivery(token);return reply(503,{error:'인증코드를 보내지 못했습니다. 잠시 후 다시 시도하세요.'});}
       }
       return reply(200,{ok:true,emailMode:'code',message:'등록된 계정이면 인증코드를 보냈습니다. 스팸함도 확인하세요. 코드는 10분 동안 유효합니다.'},{'Set-Cookie':`recovery_challenge=${challenge}; HttpOnly; SameSite=Strict; Path=/; Max-Age=600${new URL(request.url).protocol==='https:'?'; Secure':''}`});
     }
@@ -34,7 +49,7 @@ export async function handleRecovery(db,request,env,input={},fetcher=fetch,gmail
       const token=await issueResetGrant(db,account),base=new URL(env.SOCIAL_BASE_URL||'https://soccer-matchday-b16.pages.dev');
       const link=base.origin+'/#reset='+token;
       try{const sent=await fetcher('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.RESEND_API_KEY.trim(),'Content-Type':'application/json'},body:JSON.stringify({from:env.PASSWORD_RESET_FROM.trim(),to:[email],subject:'MATCHDAY 비밀번호 재설정',text:`아래 링크에서 새 비밀번호를 설정하세요. 링크는 15분 동안 한 번만 사용할 수 있습니다.\n${link}\n요청하지 않았다면 이 메일을 무시하세요.`}),signal:AbortSignal.timeout(10000)});if(!sent.ok)throw new Error('delivery failed');}
-      catch{await db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(hash(token));return reply(503,{error:'이메일 발송을 완료하지 못했습니다. 잠시 후 다시 시도하세요.'});}
+      catch{await undoFailedDelivery(token);return reply(503,{error:'이메일 발송을 완료하지 못했습니다. 잠시 후 다시 시도하세요.'});}
     }
     return reply(200,{ok:true,message:'등록된 계정이면 재설정 메일을 보냈습니다. 스팸함도 확인하세요. 링크는 15분 동안 유효합니다.'});
   }

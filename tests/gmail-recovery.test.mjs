@@ -33,8 +33,9 @@ for(const runtime of ['SQLite','D1'])test(runtime+' Gmail codes bind browser, ex
     assert.equal((await call('verify-code',{code:delivered})).status,429);
     const expired=await call('request',{email:'member@example.com'});cookie=expired.headers['Set-Cookie'].split(';')[0];sqlite.exec('UPDATE password_resets SET expires_at=0');assert.equal((await call('verify-code',{code:delivered})).status,400);
     const unknown=await call('request',{email:'unknown@example.com'},'',()=>{throw new Error('must not send');});assert.equal(unknown.status,200);assert.equal(unknown.body.message,request.body.message);assert.equal((await call('verify-code',{code:'000000'},unknown.headers['Set-Cookie'].split(';')[0])).status,400);
+    sqlite.exec("UPDATE recovery_attempts SET count=10 WHERE key LIKE 'send-v2:email:%'");
     assert.equal((await call('request',{email:'member@example.com'})).status,429);
-    sqlite.exec('DELETE FROM recovery_attempts');const failure=await call('request',{email:'member@example.com'},'',()=>{throw new Error('SMTP');});assert.equal(failure.status,503);assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM password_resets').get().n,0);
+    sqlite.exec('DELETE FROM recovery_attempts');const failure=await call('request',{email:'member@example.com'},'',()=>{throw new Error('SMTP');});assert.equal(failure.status,503);assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM password_resets').get().n,0);assert.ok(sqlite.prepare('SELECT count FROM recovery_attempts').all().every(row=>row.count===0));
   }finally{sqlite.close();}
 });
 
