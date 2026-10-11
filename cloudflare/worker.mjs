@@ -15,7 +15,7 @@ const tokenFor=request=>/(?:^|;\s*)session=([a-f0-9]{64})(?:;|$)/.exec(request.h
 const cookie=(request,token,maxAge)=>`session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${new URL(request.url).protocol==='https:'?'; Secure':''}`;
 const headers={
   'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin',
-  'Content-Security-Policy':"default-src 'self'; script-src 'self' https://t1.kakaocdn.net; connect-src 'self' https://kapi.kakao.com https://kauth.kakao.com; frame-src https://kakao.com https://*.kakao.com; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://sharer.kakao.com",
+  'Content-Security-Policy':"default-src 'self'; script-src 'self' https://t1.kakaocdn.net https://*.googlesyndication.com https://*.doubleclick.net https://*.google.com; connect-src 'self' https://kapi.kakao.com https://kauth.kakao.com https://*.googlesyndication.com https://*.doubleclick.net https://*.google.com; frame-src https://kakao.com https://*.kakao.com https://*.googlesyndication.com https://*.doubleclick.net https://*.google.com; style-src 'self'; img-src 'self' data: https://*.googlesyndication.com https://*.doubleclick.net https://*.google.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://sharer.kakao.com",
 };
 const json=(status,body,extra={})=>Response.json(body,{status,headers:{...headers,'Cache-Control':'no-store',...extra}});
 async function userFor(db,request){
