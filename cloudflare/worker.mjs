@@ -1,4 +1,5 @@
 import {handleRecovery} from '../password-recovery.mjs';
+import {sendWorkerGmailCode} from './gmail-transport.mjs';
 import {handleAccount} from '../account.mjs';
 import {handleSocial} from '../social-auth.mjs';
 import { handleCommunity,nicknameError,nicknameKey,publicUser} from '../community.mjs';
@@ -94,7 +95,7 @@ export default {
           return json(200,{ok:true},{'Set-Cookie':cookie(request,'',0)});
         }
         let result;
-        if(path.startsWith('/api/recovery/'))result=await handleRecovery(db,request,env,input);
+        if(path.startsWith('/api/recovery/'))result=await handleRecovery(db,request,env,input,fetch,sendWorkerGmailCode);
         else if(path.startsWith('/api/account/'))result=await handleAccount(db,path,user,input);
         else if(path.startsWith('/api/social/'))result=await handleSocial(db,request,env,user,input);
         else if(path.startsWith('/api/community/'))result=await handleCommunity(db,path,user,input);

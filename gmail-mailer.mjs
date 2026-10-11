@@ -8,7 +8,8 @@ export const gmailEnabled=env=>/^[a-zA-Z0-9]{16}$/.test((env.GMAIL_APP_PASSWORD|
 // No SMTP responses, credentials or reset codes are written to logs.
 export async function sendGmailCode(env,to,code,connect=tlsConnect){
   if(!gmailEnabled(env)||!/^\d{6}$/.test(code)||! /^[^\s<>\r\n@]+@[^\s<>\r\n@]+\.[^\s<>\r\n@]+$/.test(to))throw new Error('Invalid mail configuration');
-  const socket=connect({host:'smtp.gmail.com',port:465,servername:'smtp.gmail.com',rejectUnauthorized:true});
+  const connection=connect({host:'smtp.gmail.com',port:465,servername:'smtp.gmail.com',rejectUnauthorized:true});
+  const socket=typeof connection?.then==='function'?await connection:connection;
   let buffer='',waiting=null,failure=null,stage='greeting';
   const fail=()=>{failure=new Error('Gmail SMTP connection failed ('+stage+')');waiting?.();};
   socket.on('data',data=>{buffer+=data.toString('utf8');if(buffer.length>65536){fail();socket.destroy();}waiting?.();});
@@ -23,7 +24,7 @@ export async function sendGmailCode(env,to,code,connect=tlsConnect){
     do{current=await line();if(!/^\d{3}[ -]/.test(current))throw new Error('Invalid SMTP response');}while(current[3]==='-');
     const status=Number(current.slice(0,3));if(!expected.includes(status))throw new Error('Gmail SMTP rejected request ('+status+')');
   }
-  const command=async(text,expected)=>{socket.write(text+'\r\n');await reply(expected);};
+  const command=async(text,expected)=>{await socket.write(text+'\r\n');await reply(expected);};
   try{
     await reply([220]);stage='hello';await command('EHLO matchday',[250]);
     stage='authentication';await command('AUTH PLAIN '+Buffer.from('\0'+GMAIL_SENDER+'\0'+env.GMAIL_APP_PASSWORD.replace(/\s/g,'')).toString('base64'),[235]);
@@ -32,6 +33,6 @@ export async function sendGmailCode(env,to,code,connect=tlsConnect){
     const body=Buffer.from(text,'utf8').toString('base64').match(/.{1,76}/g).join('\r\n');
     const message=[`From: MATCHDAY <${GMAIL_SENDER}>`,`To: <${to}>`,'Subject: =?UTF-8?B?'+Buffer.from('MATCHDAY 비밀번호 재설정 인증코드').toString('base64')+'?=', 'Date: '+new Date().toUTCString(),'Message-ID: <'+randomBytes(16).toString('hex')+'@gmail.com>','MIME-Version: 1.0','Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: base64','',body].join('\r\n');
     stage='message';await command(message+'\r\n.',[250]);
-    socket.write('QUIT\r\n');
+    await Promise.resolve(socket.write('QUIT\r\n')).catch(()=>{});
   }finally{clearTimeout(deadline);socket.destroy();}
 }
